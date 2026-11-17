@@ -1,0 +1,10 @@
+[project]
+name = "triton-event-feed-backend"
+version = "0.1.0"
+description = "Backend for the Triton Event Feed application."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "dotenv>=0.9.9",
+    "fastapi>=0.163.1",
+]
