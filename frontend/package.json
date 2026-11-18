@@ -1,0 +1,15 @@
+{
+  "name": "triton-event-feed",
+  "version": "1.0.0",
+  "description": "frontend for triton-event-feed",
+  "main": "script.js",
+  "scripts": {
+    "dev": "vite",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "CSE 210 Team 2",
+  "license": "ISC",
+  "devDependencies": {
+    "vite": "^8.3.8"
+  }
+}
