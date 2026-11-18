@@ -1,0 +1,24 @@
+name: Backend Linting and Formatting Checks
+
+# Runs on every push (any branch) and every pull request, so a unformatted change or
+# a linting error shows a red check before it reaches main.
+on:
+    push:
+    pull_request:
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+            - name: Set up Python
+              uses: actions/setup-python@v4
+              with:
+                  python-version: '3.12'
+            - name: Install dependencies
+              run: pip install -r requirements.txt
+            - name: Run style linter checks
+              run: flake8 .
+            - name: Run prettier checks
+              run: black --check .
