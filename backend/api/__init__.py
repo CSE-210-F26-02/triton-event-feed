@@ -1,3 +1,3 @@
-from .healthCheck import health_router
+from .health_check import health_router
 
 __all__ = ["health_router"]

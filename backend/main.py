@@ -1,9 +1,10 @@
+import logging
+import os
+
+from backend.api import health_check
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api import *
-import os
-from dotenv import load_dotenv
-import logging
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,15 +26,11 @@ app.add_middleware(
         )
     ],
     allow_credentials=True,
-    allow_methods=(
-        ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-        if os.getenv("IS_PROD") == "False"
-        else ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-    ),
+    allow_methods=(["GET", "POST", "PUT", "DELETE", "OPTIONS"]),
     allow_headers=["*"],
 )
 
-app.include_router(health_router)
+app.include_router(health_check.health_router)
 
 if __name__ == "__main__":
     import uvicorn
