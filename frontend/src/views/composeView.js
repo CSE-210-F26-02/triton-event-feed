@@ -2,8 +2,13 @@
  * Create / edit event form in a <dialog>, validated client-side against the lexicon.
  * @module views/composeView
  */
-import { closeDialog, h, openDialog } from '../dom.js';
-import { buildEventRecord, parseAtUri, validateEventRecord, validateHashtag } from '../records.js';
+import { closeDialog, h, openDialog } from "../dom.js";
+import {
+  buildEventRecord,
+  parseAtUri,
+  validateEventRecord,
+  validateHashtag,
+} from "../records.js";
 
 /**
  * ISO timestamp → value for <input type="datetime-local"> in local time.
@@ -11,9 +16,9 @@ import { buildEventRecord, parseAtUri, validateEventRecord, validateHashtag } fr
  * @returns {string}
  */
 export function isoToLocalInput(iso) {
-  if (!iso) return '';
+  if (!iso) return "";
   const d = new Date(iso);
-  const p = (n) => String(n).padStart(2, '0');
+  const p = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
@@ -23,12 +28,24 @@ export function isoToLocalInput(iso) {
  * @returns {string}
  */
 export function localInputToIso(value) {
-  if (!value) return '';
+  if (!value) return "";
   const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? '' : d.toISOString();
+  return Number.isNaN(d.getTime()) ? "" : d.toISOString();
 }
 
-const FIELDS = ['name', 'description', 'startsAt', 'endsAt', 'locationName', 'address', 'lat', 'lng', 'tags', 'group', 'hashtag'];
+const FIELDS = [
+  "name",
+  "description",
+  "startsAt",
+  "endsAt",
+  "locationName",
+  "address",
+  "lat",
+  "lng",
+  "tags",
+  "group",
+  "hashtag",
+];
 
 /**
  * Read raw values from the compose form.
@@ -36,7 +53,9 @@ const FIELDS = ['name', 'description', 'startsAt', 'endsAt', 'locationName', 'ad
  * @returns {Record<string, string>}
  */
 export function readForm(form) {
-  return Object.fromEntries(FIELDS.map((f) => [f, form.elements[f]?.value ?? '']));
+  return Object.fromEntries(
+    FIELDS.map((f) => [f, form.elements[f]?.value ?? ""]),
+  );
 }
 
 /**
@@ -55,8 +74,10 @@ export function validateForm(values, base = {}) {
     sourceUrl: base.sourceUrl,
   });
   const errors = validateEventRecord(record);
-  const partialCoords = Boolean(values.lat?.trim()) !== Boolean(values.lng?.trim());
-  if (partialCoords) errors.coords = 'Enter both latitude and longitude, or neither.';
+  const partialCoords =
+    Boolean(values.lat?.trim()) !== Boolean(values.lng?.trim());
+  if (partialCoords)
+    errors.coords = "Enter both latitude and longitude, or neither.";
   if (errors.coords) {
     errors.lat = errors.coords;
     delete errors.coords;
@@ -69,11 +90,13 @@ export function validateForm(values, base = {}) {
 function field(name, label, input, hint) {
   input.id = `c-${name}`;
   input.name = name;
-  return h('div', { class: 'field' },
-    h('label', { for: input.id }, label),
-    hint && h('p', { class: 'hint', id: `c-${name}-hint` }, hint),
+  return h(
+    "div",
+    { class: "field" },
+    h("label", { for: input.id }, label),
+    hint && h("p", { class: "hint", id: `c-${name}-hint` }, hint),
     input,
-    h('p', { class: 'field__error', id: `c-${name}-err` }),
+    h("p", { class: "field__error", id: `c-${name}-err` }),
   );
 }
 
@@ -87,11 +110,11 @@ export function showErrors(form, errors) {
     const input = form.elements[f];
     const err = form.querySelector(`#c-${f}-err`);
     if (!input || !err) continue;
-    const msg = errors[f] || '';
+    const msg = errors[f] || "";
     err.textContent = msg;
-    input.setAttribute('aria-invalid', String(Boolean(msg)));
-    const hint = form.querySelector(`#c-${f}-hint`) ? `c-${f}-hint ` : '';
-    input.setAttribute('aria-describedby', `${hint}c-${f}-err`.trim());
+    input.setAttribute("aria-invalid", String(Boolean(msg)));
+    const hint = form.querySelector(`#c-${f}-hint`) ? `c-${f}-hint ` : "";
+    input.setAttribute("aria-describedby", `${hint}c-${f}-err`.trim());
   }
   const first = FIELDS.find((f) => errors[f]);
   if (first) form.elements[first].focus();
@@ -104,30 +127,120 @@ export function showErrors(form, errors) {
  */
 export function buildForm(ev) {
   const loc = ev?.location || {};
-  const input = (attrs) => h('input', attrs);
-  return h('form', { class: 'compose', novalidate: true },
-    field('name', 'Event name', input({ required: true, maxlength: 200, value: ev?.name ?? '' })),
-    field('description', 'Description', h('textarea', { rows: 4, maxlength: 3000, value: ev?.description ?? '' })),
-    h('div', { class: 'field-row' },
-      field('startsAt', 'Starts', input({ type: 'datetime-local', required: true, value: isoToLocalInput(ev?.startsAt) })),
-      field('endsAt', 'Ends', input({ type: 'datetime-local', required: true, value: isoToLocalInput(ev?.endsAt) })),
+  const input = (attrs) => h("input", attrs);
+  return h(
+    "form",
+    { class: "compose", novalidate: true },
+    field(
+      "name",
+      "Event name",
+      input({ required: true, maxlength: 200, value: ev?.name ?? "" }),
     ),
-    field('locationName', 'Location name', input({ required: true, maxlength: 200, value: loc.name ?? '', placeholder: 'Price Center East' })),
-    field('address', 'Address (optional)', input({ maxlength: 300, value: loc.address ?? '' })),
-    h('div', { class: 'field-row' },
-      field('lat', 'Latitude (optional)', input({ inputmode: 'decimal', value: loc.lat ?? '' })),
-      field('lng', 'Longitude (optional)', input({ inputmode: 'decimal', value: loc.lng ?? '' })),
+    field(
+      "description",
+      "Description",
+      h("textarea", { rows: 4, maxlength: 3000, value: ev?.description ?? "" }),
     ),
-    h('button', { type: 'button', class: 'btn', dataset: { action: 'locate' } }, 'Use my location'),
-    field('tags', 'Tags', input({ value: (ev?.tags || []).join(', '), placeholder: 'free food, music' }), 'Comma-separated, up to 10.'),
-    field('group', 'Group / org (optional)', input({ maxlength: 100, value: ev?.group ?? '' })),
-    field('hashtag', 'Sync from Bluesky hashtag (optional)', input({ maxlength: 64, placeholder: 'ucsdhackathon' }),
-      'Your Bluesky posts with this hashtag appear as updates on the event.'),
-    h('p', { class: 'form-status', role: 'status' }),
-    h('div', { class: 'card__actions' },
-      h('button', { type: 'submit', class: 'btn btn--primary' }, ev ? 'Save changes' : 'Create event'),
-      ev && h('button', { type: 'button', class: 'btn btn--danger', dataset: { action: 'delete' } }, 'Delete'),
-      h('button', { type: 'button', class: 'btn', dataset: { action: 'cancel' } }, 'Cancel'),
+    h(
+      "div",
+      { class: "field-row" },
+      field(
+        "startsAt",
+        "Starts",
+        input({
+          type: "datetime-local",
+          required: true,
+          value: isoToLocalInput(ev?.startsAt),
+        }),
+      ),
+      field(
+        "endsAt",
+        "Ends",
+        input({
+          type: "datetime-local",
+          required: true,
+          value: isoToLocalInput(ev?.endsAt),
+        }),
+      ),
+    ),
+    field(
+      "locationName",
+      "Location name",
+      input({
+        required: true,
+        maxlength: 200,
+        value: loc.name ?? "",
+        placeholder: "Price Center East",
+      }),
+    ),
+    field(
+      "address",
+      "Address (optional)",
+      input({ maxlength: 300, value: loc.address ?? "" }),
+    ),
+    h(
+      "div",
+      { class: "field-row" },
+      field(
+        "lat",
+        "Latitude (optional)",
+        input({ inputmode: "decimal", value: loc.lat ?? "" }),
+      ),
+      field(
+        "lng",
+        "Longitude (optional)",
+        input({ inputmode: "decimal", value: loc.lng ?? "" }),
+      ),
+    ),
+    h(
+      "button",
+      { type: "button", class: "btn", dataset: { action: "locate" } },
+      "Use my location",
+    ),
+    field(
+      "tags",
+      "Tags",
+      input({
+        value: (ev?.tags || []).join(", "),
+        placeholder: "free food, music",
+      }),
+      "Comma-separated, up to 10.",
+    ),
+    field(
+      "group",
+      "Group / org (optional)",
+      input({ maxlength: 100, value: ev?.group ?? "" }),
+    ),
+    field(
+      "hashtag",
+      "Sync from Bluesky hashtag (optional)",
+      input({ maxlength: 64, placeholder: "ucsdhackathon" }),
+      "Your Bluesky posts with this hashtag appear as updates on the event.",
+    ),
+    h("p", { class: "form-status", role: "status" }),
+    h(
+      "div",
+      { class: "card__actions" },
+      h(
+        "button",
+        { type: "submit", class: "btn btn--primary" },
+        ev ? "Save changes" : "Create event",
+      ),
+      ev &&
+        h(
+          "button",
+          {
+            type: "button",
+            class: "btn btn--danger",
+            dataset: { action: "delete" },
+          },
+          "Delete",
+        ),
+      h(
+        "button",
+        { type: "button", class: "btn", dataset: { action: "cancel" } },
+        "Cancel",
+      ),
     ),
   );
 }
@@ -139,21 +252,36 @@ export function buildForm(ev) {
  *   toast?: (msg: string, o?: object) => void, confirmImpl?: (msg: string) => boolean}} deps
  * @returns {{open(ev?: object|null): void, remove(ev: object): Promise<void>, element: HTMLDialogElement}}
  */
-export function createComposeView({ getWriter, geo, onSaved, onDeleted, toast = () => {}, confirmImpl = (m) => globalThis.confirm(m) }) {
-  const dialog = h('dialog', { class: 'dialog', 'aria-labelledby': 'compose-title' });
+export function createComposeView({
+  getWriter,
+  geo,
+  onSaved,
+  onDeleted,
+  toast = () => {},
+  confirmImpl = (m) => globalThis.confirm(m),
+}) {
+  const dialog = h("dialog", {
+    class: "dialog",
+    "aria-labelledby": "compose-title",
+  });
 
   function open(ev = null) {
     const form = buildForm(ev);
-    const status = form.querySelector('.form-status');
-    form.addEventListener('submit', (e) => {
+    const status = form.querySelector(".form-status");
+    form.addEventListener("submit", (e) => {
       e.preventDefault();
       submit(form, ev, status);
     });
-    form.querySelector('[data-action=cancel]').onclick = () => closeDialog(dialog);
-    form.querySelector('[data-action=locate]').onclick = () => locate(form, status);
-    const del = form.querySelector('[data-action=delete]');
+    form.querySelector("[data-action=cancel]").onclick = () =>
+      closeDialog(dialog);
+    form.querySelector("[data-action=locate]").onclick = () =>
+      locate(form, status);
+    const del = form.querySelector("[data-action=delete]");
     if (del) del.onclick = () => remove(ev);
-    dialog.replaceChildren(h('h2', { id: 'compose-title' }, ev ? 'Edit event' : 'New event'), form);
+    dialog.replaceChildren(
+      h("h2", { id: "compose-title" }, ev ? "Edit event" : "New event"),
+      form,
+    );
     openDialog(dialog);
   }
 
@@ -169,17 +297,25 @@ export function createComposeView({ getWriter, geo, onSaved, onDeleted, toast = 
 
   async function submit(form, ev, status) {
     const values = readForm(form);
-    const { record, errors } = validateForm(values, ev ? { createdAt: ev.createdAt ?? ev.indexedAt, sourceUrl: ev.sourceUrl } : {});
+    const { record, errors } = validateForm(
+      values,
+      ev
+        ? { createdAt: ev.createdAt ?? ev.indexedAt, sourceUrl: ev.sourceUrl }
+        : {},
+    );
     showErrors(form, errors);
     if (Object.keys(errors).length) return;
     const writer = getWriter();
-    if (!writer) return void (status.textContent = 'Log in to post events.');
-    const btn = form.querySelector('[type=submit]');
+    if (!writer) return void (status.textContent = "Log in to post events.");
+    const btn = form.querySelector("[type=submit]");
     btn.disabled = true;
-    status.textContent = 'Saving…';
+    status.textContent = "Saving…";
     try {
-      const res = ev ? await writer.updateEvent(parseAtUri(ev.uri).rkey, record) : await writer.createEvent(record);
-      if (values.hashtag.trim()) await writer.createListener(res.uri, values.hashtag);
+      const res = ev
+        ? await writer.updateEvent(parseAtUri(ev.uri).rkey, record)
+        : await writer.createEvent(record);
+      if (values.hashtag.trim())
+        await writer.createListener(res.uri, values.hashtag);
       closeDialog(dialog);
       onSaved?.(res);
     } catch (err) {
@@ -197,7 +333,7 @@ export function createComposeView({ getWriter, geo, onSaved, onDeleted, toast = 
       closeDialog(dialog);
       onDeleted?.(ev.uri);
     } catch (err) {
-      toast(`Could not delete: ${err.message}`, { kind: 'error' });
+      toast(`Could not delete: ${err.message}`, { kind: "error" });
     }
   }
 
