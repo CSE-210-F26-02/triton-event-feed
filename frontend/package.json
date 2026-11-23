@@ -16,5 +16,8 @@
     "eslint": "^10.15.0",
     "prettier": "^3.10.1",
     "vite": "^8.3.8"
+  },
+  "dependencies": {
+    "@atproto/oauth-client-browser": "^0.5.17"
   }
 }
