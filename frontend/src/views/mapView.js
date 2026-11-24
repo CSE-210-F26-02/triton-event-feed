@@ -169,3 +169,69 @@ export function createMapView(
 
   return { show };
 }
+
+/**
+ * Small single-pin map used inside the event detail pane. Shares the Leaflet loader
+ * (and therefore the browser's tile cache) with the main map.
+ * @param {HTMLElement} root container; must be in the document before show() resolves
+ * @param {{config?: Partial<typeof MAP_CONFIG>, load?: (c: typeof MAP_CONFIG) => Promise<any>}} [opts]
+ * @returns {{show(event: object): Promise<void>, destroy(): void}}
+ */
+export function createPinMap(root, { config = {}, load = loadLeaflet } = {}) {
+  const mapConfig = { ...MAP_CONFIG, ...config };
+  let pinMap = null;
+  let destroyed = false;
+
+  /** Render the pin for `event` (or a notice when it has no coordinates). */
+  async function show(event) {
+    const coords = coordsOf(event);
+    if (!coords) {
+      root.replaceChildren(
+        h(
+          "p",
+          { class: "muted detail__map-note" },
+          "No map pin for this location.",
+        ),
+      );
+      return;
+    }
+    root.replaceChildren(h("p", { role: "status" }, "Loading map…"));
+    let L;
+    try {
+      L = await load(mapConfig);
+    } catch {
+      if (!destroyed)
+        root.replaceChildren(
+          h(
+            "p",
+            { class: "notice notice--error", role: "alert" },
+            "The map could not load.",
+          ),
+        );
+      return;
+    }
+    if (destroyed) return;
+    const mapElement = h("div", {
+      class: "map",
+      role: "img",
+      "aria-label": `Map showing ${event.location?.name ?? "the event location"}`,
+    });
+    root.replaceChildren(mapElement);
+    pinMap = L.map(mapElement).setView([coords.lat, coords.lng], 17);
+    L.tileLayer(mapConfig.tileUrl, {
+      maxZoom: mapConfig.maxZoom,
+      attribution: mapConfig.attribution,
+    }).addTo(pinMap);
+    L.marker([coords.lat, coords.lng], { title: event.name }).addTo(pinMap);
+    pinMap.invalidateSize();
+  }
+
+  /** Release the Leaflet instance (call before discarding the container). */
+  function destroy() {
+    destroyed = true;
+    pinMap?.remove?.();
+    pinMap = null;
+  }
+
+  return { show, destroy };
+}

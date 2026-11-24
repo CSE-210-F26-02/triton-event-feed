@@ -6,6 +6,7 @@ import {
   coordsOf,
   groupByDay,
   haversineKm,
+  isEnded,
   isUpdated,
   sortByDistance,
   toggleTag,
@@ -124,5 +125,17 @@ describe("isUpdated", () => {
       }),
     ).toBe(false);
     expect(isUpdated({})).toBe(false);
+  });
+});
+
+describe("isEnded", () => {
+  const now = new Date("2026-11-11T20:00:00Z");
+  it("is true after endsAt or when the backend marks it ended", () => {
+    expect(isEnded({ endsAt: "2026-11-11T19:59:59Z" }, now)).toBe(true);
+    expect(isEnded({ endsAt: "2026-11-11T20:00:01Z" }, now)).toBe(false);
+    expect(
+      isEnded({ status: "ended", endsAt: "2030-01-01T00:00:00Z" }, now),
+    ).toBe(true);
+    expect(isEnded({ endsAt: "not a date" }, now)).toBe(false);
   });
 });

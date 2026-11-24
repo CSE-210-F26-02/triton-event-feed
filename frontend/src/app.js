@@ -14,6 +14,7 @@ import {
   toggleTag,
 } from "./filters.js";
 import { createGeo } from "./geo.js";
+import { createRouter, shareUrl } from "./router.js";
 import { createStore } from "./store.js";
 import { createSubscriptions } from "./subscriptions.js";
 import { createToaster } from "./toast.js";
@@ -145,12 +146,19 @@ export async function start({
     onChange: (subscribed) => store.set({ subscribed }),
     onNotification: (n) => applyNotification(n),
   });
-  const detail = createDetailView({
+  const detail = createDetailView($("#panel-detail"), {
     api,
+    findEvent: (uri) => store.get().events.find((e) => e.uri === uri) ?? null,
     canEdit,
+    isSubscribed: (uri) => store.get().subscribed.has(uri),
+    // #20: the frontend subscriptions client exists; its backend endpoint is still pending.
+    onToggleSubscribe: (uri) => toggleSubscribe(uri),
     onEdit: (ev) => compose.open(ev),
     onDelete: (ev) => compose.remove(ev),
+    onClose: () => router.home(),
+    onCopyLink: (uri) => copyEventLink(uri),
   });
+  const router = createRouter({ onChange: applyRoute });
   const compose = createComposeView({
     getWriter: writer,
     geo,
@@ -160,11 +168,13 @@ export async function start({
       setTimeout(() => {
         loadEvents();
         loadFacets();
+        if (detail.currentUri) detail.open(detail.currentUri);
       }, 1500);
     },
     onDeleted: (uri) => {
       toast("Event deleted.");
       store.set({ events: store.get().events.filter((e) => e.uri !== uri) });
+      if (detail.currentUri === uri) router.home();
     },
   });
   const login = createLoginView({
@@ -184,7 +194,40 @@ export async function start({
   const list = createListView($("#list"), {
     onLoadMore: () => loadEvents({ append: true }),
   });
-  const map = createMapView($("#map"), { onOpen: (uri) => detail.open(uri) });
+  const map = createMapView($("#map"), {
+    onOpen: (uri) => router.openEvent(uri),
+  });
+
+  /**
+   * Show the detail pane in place of the map for event routes, or the map otherwise.
+   * @param {import('./router.js').Route} route
+   */
+  function applyRoute(route) {
+    const showDetail = route.view === "event";
+    $(".events-layout").dataset.view = showDetail ? "detail" : "map";
+    $("#panel-map").hidden = showDetail;
+    $("#panel-detail").hidden = !showDetail;
+    if (showDetail) detail.open(route.uri);
+    else {
+      detail.close();
+      render(); // the map was hidden; re-show so Leaflet re-measures its container
+    }
+  }
+
+  /**
+   * Copy an event's shareable URL to the clipboard.
+   * @param {string} uri
+   */
+  async function copyEventLink(uri) {
+    try {
+      await navigator.clipboard.writeText(shareUrl(uri));
+      toast("Link copied.");
+    } catch {
+      toast("Could not copy — use the address bar link instead.", {
+        kind: "error",
+      });
+    }
+  }
 
   async function toggleSubscribe(uri) {
     try {
@@ -198,6 +241,7 @@ export async function start({
 
   async function applyNotification(n) {
     const { events } = store.get();
+    if (detail.currentUri === n.eventUri) detail.open(n.eventUri);
     if (n.kind === "deleted" || n.kind === "expired") {
       store.set({ events: events.filter((e) => e.uri !== n.eventUri) });
     } else if (
@@ -235,12 +279,13 @@ export async function start({
       error: s.error,
       activeTags: s.filters.tags,
       subscribed: s.subscribed,
-      onOpen: (uri) => detail.open(uri),
+      onOpen: (uri) => router.openEvent(uri),
       onTagClick: (tag) =>
         changeFilters({ tags: toggleTag(store.get().filters.tags, tag) }),
       onToggleSubscribe: toggleSubscribe,
     });
     map.show(shown);
+    detail.refreshActions();
   }
 
   function renderAccount() {
@@ -314,6 +359,7 @@ export async function start({
     /* offline with nothing cached: read-only */
   }
   renderAccount();
+  router.start();
   loadFacets();
   loadEvents();
   subs.load();

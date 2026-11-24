@@ -3,7 +3,7 @@
  * - GET /api/*: network-first, falling back to the cached copy (marked with x-cm-stale: 1).
  * - Never cached: non-GET requests and the SSE notification stream.
  */
-const VERSION = "v12";
+const VERSION = "v13";
 const SHELL_CACHE = `cm-shell-${VERSION}`;
 const API_CACHE = `cm-api-${VERSION}`;
 const SHELL = [
@@ -24,6 +24,7 @@ const SHELL = [
   "./src/format.js",
   "./src/geo.js",
   "./src/records.js",
+  "./src/router.js",
   "./src/store.js",
   "./src/subscriptions.js",
   "./src/toast.js",

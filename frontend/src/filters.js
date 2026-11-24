@@ -186,3 +186,16 @@ export function isUpdated(event) {
   if (!event?.updatedAt || !event?.indexedAt) return false;
   return new Date(event.updatedAt) > new Date(event.indexedAt);
 }
+
+/**
+ * True when the event is over: the backend marked it "ended" (#10), or its end time passed.
+ * STUB(#10): until the backend expires events, the client-side end-time check does the work.
+ * @param {{status?: string, endsAt?: string}} event
+ * @param {Date} [now]
+ * @returns {boolean}
+ */
+export function isEnded(event, now = new Date()) {
+  if (event?.status === "ended") return true;
+  const endTime = Date.parse(event?.endsAt);
+  return Number.isFinite(endTime) && endTime <= now.getTime();
+}

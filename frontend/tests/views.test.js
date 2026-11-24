@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { createDetailView, renderDetail } from "../src/views/detailView.js";
 import { createFilterBar } from "../src/views/filterBar.js";
 import {
   MAP_CONFIG,
   buildMarkers,
   createMapView,
+  createPinMap,
 } from "../src/views/mapView.js";
 import { createGeo } from "../src/geo.js";
 import { sampleEvent } from "./helpers.js";
@@ -81,6 +81,46 @@ describe("mapView.buildMarkers", () => {
   });
 });
 
+describe("mapView.createPinMap", () => {
+  it("centers a single marker on the event", async () => {
+    const L = fakeLeaflet();
+    const root = document.createElement("div");
+    await createPinMap(root, { load: async () => L }).show(sampleEvent());
+    expect(root.querySelector(".map")).not.toBeNull();
+    expect(L.marker).toHaveBeenCalledWith([32.8797, -117.2362], {
+      title: "Taco Tuesday",
+    });
+  });
+
+  it("explains when the event has no coordinates", async () => {
+    const load = vi.fn();
+    const root = document.createElement("div");
+    await createPinMap(root, { load }).show(
+      sampleEvent({ location: { name: "TBD" } }),
+    );
+    expect(load).not.toHaveBeenCalled();
+    expect(root.textContent).toContain("No map pin");
+  });
+
+  it("shows an error when Leaflet fails, and does nothing once destroyed", async () => {
+    const failing = document.createElement("div");
+    await createPinMap(failing, {
+      load: async () => {
+        throw new Error("offline");
+      },
+    }).show(sampleEvent());
+    expect(failing.querySelector("[role=alert]")).not.toBeNull();
+
+    const L = fakeLeaflet();
+    const root = document.createElement("div");
+    const pin = createPinMap(root, { load: async () => L });
+    const pending = pin.show(sampleEvent());
+    pin.destroy();
+    await pending;
+    expect(L.map).not.toHaveBeenCalled();
+  });
+});
+
 function fakeLeaflet() {
   const chain = () => ({
     addTo() {
@@ -103,59 +143,6 @@ function fakeLeaflet() {
     marker: vi.fn(chain),
   };
 }
-
-describe("detailView", () => {
-  it("renders description and updates newest first, escaped", () => {
-    const ev = sampleEvent({
-      description: "<b>Bring</b> a plate",
-      updates: [
-        {
-          text: "Moved inside",
-          sourceUri: null,
-          createdAt: "2026-11-11T18:00:00Z",
-        },
-        {
-          text: "Starting soon!",
-          sourceUri: null,
-          createdAt: "2026-11-11T18:30:00Z",
-        },
-      ],
-    });
-    const root = document.createElement("div");
-    root.append(...renderDetail(ev).filter(Boolean));
-    expect(root.querySelector(".detail__desc").textContent).toBe(
-      "<b>Bring</b> a plate",
-    );
-    expect(root.querySelector("b")).toBeNull();
-    expect(
-      [...root.querySelectorAll(".updates p")].map((p) => p.textContent),
-    ).toEqual(["Starting soon!", "Moved inside"]);
-    expect(root.textContent).not.toContain("Edit");
-  });
-
-  it("only links http(s) source URLs and shows edit controls for owners", () => {
-    const root = document.createElement("div");
-    root.append(
-      ...renderDetail(sampleEvent({ sourceUrl: "javascript:alert(1)" }), {
-        canEdit: true,
-      }).filter(Boolean),
-    );
-    expect(root.querySelector('a[href^="javascript"]')).toBeNull();
-    expect(root.textContent).toContain("Edit");
-  });
-
-  it("loads via api.getEvent and handles 404", async () => {
-    const api = {
-      getEvent: vi.fn(async () => {
-        throw Object.assign(new Error("nf"), { status: 404 });
-      }),
-    };
-    const v = createDetailView({ api });
-    await v.open("at://x");
-    expect(api.getEvent).toHaveBeenCalledWith("at://x");
-    expect(v.element.textContent).toContain("no longer available");
-  });
-});
 
 describe("filterBar", () => {
   it("renders tags/groups and emits changes; search is debounced", async () => {

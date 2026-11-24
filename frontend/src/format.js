@@ -95,3 +95,53 @@ export function formatDistance(km) {
     ? `${Math.round(km * 1000)} m away`
     : `${km.toFixed(1)} km away`;
 }
+
+/**
+ * Full start–end window for the detail page, always including the date and time zone,
+ * e.g. "Wednesday, November 11, 2026 · 7:00 PM – 9:00 PM UTC".
+ * @param {string} startsAt ISO
+ * @param {string} endsAt ISO
+ * @param {{locale?: string, timeZone?: string}} [opts]
+ * @returns {string}
+ */
+export function formatEventWhen(startsAt, endsAt, { locale, timeZone } = {}) {
+  const start = new Date(startsAt);
+  const end = new Date(endsAt);
+  const dateOptions = {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone,
+  };
+  const timeOptions = { hour: "numeric", minute: "2-digit", timeZone };
+  const date = new Intl.DateTimeFormat(locale, dateOptions);
+  const time = new Intl.DateTimeFormat(locale, timeOptions);
+  const timeWithZone = new Intl.DateTimeFormat(locale, {
+    ...timeOptions,
+    timeZoneName: "short",
+  });
+  const sameDay = date.format(start) === date.format(end);
+  return sameDay
+    ? `${date.format(start)} · ${time.format(start)} – ${timeWithZone.format(end)}`
+    : `${date.format(start)}, ${time.format(start)} – ${date.format(end)}, ${timeWithZone.format(end)}`;
+}
+
+/**
+ * Bluesky profile URL for a handle (preferred) or DID, or null when neither is usable.
+ * @param {string} [handle] e.g. "alice.bsky.social"
+ * @param {string} [did] e.g. "did:plc:abc"
+ * @returns {string|null}
+ */
+export function blueskyProfileUrl(handle, did) {
+  const looksLikeHandle = (value) =>
+    typeof value === "string" && /^[a-z0-9.-]+\.[a-z0-9-]+$/i.test(value);
+  const actor = looksLikeHandle(handle)
+    ? handle
+    : did?.startsWith("did:")
+      ? did
+      : null;
+  return actor
+    ? `https://bsky.app/profile/${encodeURIComponent(actor).replace(/%3A/gi, ":")}`
+    : null;
+}
