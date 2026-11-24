@@ -2,45 +2,74 @@
 // Note privacy concerns with using BSky's handle resolver
 
 import { BrowserOAuthClient } from '@atproto/oauth-client-browser'
-// import { Agent } from '@atproto/api'
+import { Agent } from '@atproto/api'
 
-const HandleResolver = 'https://bsky.social'
+// TODO: Warn users abot privacy policy, or deploy our own handler
+const HandleResolver = 'https://bsky.social';
 
-class AuthHandler
+class AuthProvider
 {
-    #clientID
-    #OAClient
-    #OACSession
-    #agent
+    /**
+     * A URL pointing to the client metadata document (oauth-client-metadata.json). Currently unused in local testing setup.
+     */
+    #clientID;
+
+    /**
+     * An OAuthClient object representing the provider's current interface with the OAuth api.
+     */
+    #oAuthClient;
+
+    /**
+     * An OAuthSession object representing the user's current authenticated session. May be null if session is invalid.
+     */
+    #oAuthSession;
+    
+    /**
+     * An Agent object (from the atproto API) for interacting with the user's PDS. May be null if session is invalid.
+     */
+    #agent;
 
     constructor() {
         this.#clientID = buildClientID();
     }
 
+    /**
+     * Constructs the oAuth client used by this provider. Should be called exactly once. 
+     */
     async preInitClient() {
         if (isLocal()) {
             // Loopback client as suggested by https://github.com/bluesky-social/atproto/tree/main/packages/oauth/oauth-client-browser
-            this.#OAClient = new BrowserOAuthClient({
+            this.#oAuthClient = new BrowserOAuthClient({
                 handleResolver: HandleResolver,
                 clientMetadata: undefined,
-            })
+            });
         } else {
-            this.#OAClient = await BrowserOAuthClient.load({
-                // Apparently possible to avoid trip to fetch metadata document, see top link
+            // Apparently possible to avoid trip to fetch metadata document, see top link
+            this.#oAuthClient = await BrowserOAuthClient.load({
                 clientId: this.#clientID,
                 handleResolver: HandleResolver,
             });
         }
+        // Handles session invalidation
+        this.#oAuthClient.addEventListener('deleted', ( event ) => {
+            this.invalidateSession();
+            const { sub, cause } = event.detail;
+            console.error(`Session for ${sub} is no longer available (cause: ${cause})`);
+        });
     }
 
+    /**
+     * Initializes the oAuth Client after it has been constructed in preInit. Should be called exactly once.
+     * @returns True if the initialization successfully recovered an existing session, false otherwise (should call login to get a session if false)
+     */
     async initClient() {
-        const result = await this.#OAClient.init();
+        const result = await this.#oAuthClient.init();
 
         if (result) {
             const {session, state } = result;
             // Docs seem to indicate session will always exist
-            this.#OACSession = session;
-            //this.#agent = Agent(session);
+            this.#oAuthSession = session;
+            this.#agent = Agent(session);
             if (state != null) {
                 console.log(`Sucessful authentication via redirect, state: ${state}`);
                 return true;
@@ -54,27 +83,49 @@ class AuthHandler
         }
     }
 
+    /**
+     * Logs the user in using a fully specified handle. If not in a local test environment, attempts to login silently.
+     */
     async login(handle) {
         try {
             // Can only perform a silent sign on for non-local clients
-            const signInPrompt = isLocal() ? 'login' : 'none'
+            const signInPrompt = isLocal() ? 'login' : 'none';
 
-            await this.#OAClient.signIn(handle, {
+            this.#oAuthSession = await this.#oAuthClient.signIn(handle, {
                 state: 'some value needed later',
                 prompt: signInPrompt,
                 ui_locales: 'en',
                 signal: new AbortController().signal
             });
 
-            // Unreachable
+            // Unreachable?
+            this.#agent = Agent(session);
         } catch (err) {
             // Login aborted
             console.error(err);
         }
     }
 
+    invalidateSession() {
+        // Handles session invalidation, may want to add a redirect at some point
+        this.#oAuthSession = null;
+        this.#agent = null;
+    }
+
+    isSessionValid() {
+        return this.#oAuthClient !== null && this.#oAuthSession !== null && this.#agent !== null;
+    }
+
     get getOAuthClient() {
-        return this.#OAClient;
+        return this.#oAuthClient;
+    }
+
+    get getSession() {
+        return this.#oAuthSession;
+    }
+
+    get getAgent() {
+        return this.#agent;
     }
 }
 
@@ -84,6 +135,7 @@ class AuthHandler
  * @returns A URL (string) representing the Client ID for an authorization request.
  */
 function buildClientID() {
+    // TODO: Might be able to just remove this
     if (isLocal()) {
         return `http://localhost?${new URLSearchParams({
             // Specifies all permissions we may need from this authorization.
@@ -101,7 +153,7 @@ function buildClientID() {
 
 function isLocal() {
     // Checks if current hostname is a synonym for the local host
-    return ["localhost", "127.0.0.1"].includes(window.location.hostname)
+    return ["localhost", "127.0.0.1"].includes(window.location.hostname);
 }
 
-export { AuthHandler };
+export { AuthProvider };
