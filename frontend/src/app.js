@@ -35,7 +35,7 @@ const $ = (sel) => document.querySelector(sel);
 export async function start({
   baseUrl = $('meta[name="cm-api-base"]')?.content ?? "",
 } = {}) {
-  const api = createApi({ baseUrl });
+  const api = createApi({ baseUrl, ...(await mockApiOptions()) });
   const toast = createToaster($("#toasts"));
   const geo = createGeo();
   const atproto = createAtprotoWriter();
@@ -364,6 +364,18 @@ export async function start({
   loadEvents();
   subs.load();
   registerServiceWorker();
+}
+
+/**
+ * STUB / DEV ONLY: with `?mock` in the page URL, answer /api/* from in-browser mock data
+ * (src/stubs/mockApi.js) so the UI can be previewed without the backend. Remove with the stub.
+ * @returns {Promise<{fetchImpl?: typeof fetch, cache?: object}>} extra createApi options
+ */
+async function mockApiOptions() {
+  if (!new URLSearchParams(globalThis.location?.search).has("mock")) return {};
+  const { createMockFetch } = await import("./stubs/mockApi.js");
+  const noCache = { get: () => null, set: () => {} }; // never mix mock data into the real cache
+  return { fetchImpl: createMockFetch(), cache: noCache };
 }
 
 function dedupe(events) {
