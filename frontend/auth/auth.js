@@ -50,12 +50,14 @@ class AuthProvider
                 handleResolver: HandleResolver,
             });
         }
-        // Handles session invalidation
-        this.#oAuthClient.addEventListener('deleted', ( event ) => {
+
+        // TODO: Handles session invalidation
+        // Based on snippet from https://www.npmjs.com/package/@atproto/oauth-client-browser
+        /* this.#oAuthClient.addEventListener('deleted', ( event ) => {
             this.invalidateSession();
             const { sub, cause } = event.detail;
             console.error(`Session for ${sub} is no longer available (cause: ${cause})`);
-        });
+        });*/
     }
 
     /**
@@ -69,7 +71,7 @@ class AuthProvider
             const {session, state } = result;
             // Docs seem to indicate session will always exist
             this.#oAuthSession = session;
-            this.#agent = Agent(session);
+            this.#agent = new Agent(session);
             if (state != null) {
                 console.log(`Sucessful authentication via redirect, state: ${state}`);
                 return true;
@@ -98,8 +100,7 @@ class AuthProvider
                 signal: new AbortController().signal
             });
 
-            // Unreachable?
-            this.#agent = Agent(session);
+            // Unreachable, will redirect, prompting a page reload that restarts the client init process.
         } catch (err) {
             // Login aborted
             console.error(err);
@@ -116,15 +117,15 @@ class AuthProvider
         return this.#oAuthClient !== null && this.#oAuthSession !== null && this.#agent !== null;
     }
 
-    get getOAuthClient() {
+    get oAuthClient() {
         return this.#oAuthClient;
     }
 
-    get getSession() {
+    get session() {
         return this.#oAuthSession;
     }
 
-    get getAgent() {
+    get agent() {
         return this.#agent;
     }
 }

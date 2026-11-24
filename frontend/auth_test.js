@@ -1,9 +1,12 @@
 import { AuthProvider } from "./auth/auth";
 
-const auth = new AuthProvider();
+// Just a quick demo of the auth provider.
 
 // Testing notes:
-// Don't host on Vite's default hostname (localhost), need to specify 127.0.0.1 to statisfy the atproto library
+// Don't host on Vite's default hostname (localhost), need to specify 127.0.0.1 to statisfy the atproto library's specifications
+// For local testing, hosting the website with 'npx vite --host 127.0.0.1' and then navigating to the site (+port) has worked for me.
+
+const auth = new AuthProvider();
 
 await auth.preInitClient();
 const initOutcome = await auth.initClient();
@@ -13,4 +16,9 @@ if (initOutcome) {
     auth.login("chherbert.bsky.social");
 }
 
-console.log("Session valid: " + auth.isSessionValid());
+const validSession = auth.isSessionValid()
+
+console.log(`Session valid: ${validSession}`);
+if (validSession) {
+    console.log(`Session: ${auth.session.sub}`)
+} 
