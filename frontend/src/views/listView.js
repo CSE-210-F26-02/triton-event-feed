@@ -106,17 +106,27 @@ export function createListView(root, { onLoadMore, IntersectionObserverImpl = gl
     const nodes = [];
     if (state.stale) nodes.push(staleBanner(state.savedAt));
     if (state.error) nodes.push(h('p', { class: 'notice notice--error', role: 'alert' }, state.error));
-    const groups = groupByDay(state.events || [], { now: state.now, locale: state.locale });
-    if (!groups.length && !state.loading && !state.error) {
-      nodes.push(h('p', { class: 'empty' }, 'No events match your filters. Try clearing a tag or search.'));
-    }
-    for (const g of groups) {
-      const id = `day-${g.key}`;
-      nodes.push(h('section', { class: 'day', 'aria-labelledby': id },
-        h('h2', { class: 'day__title', id }, g.label),
-        h('div', { class: 'grid' }, g.events.map((ev) => renderCard(ev, state))),
+
+    const events = state.events || [];
+    if (!events.length) {
+      if (!state.loading && !state.error) {
+        nodes.push(h('p', { class: 'empty' }, 'No events match your filters. Try clearing a tag or search.'));
+      }
+    } else if (state.sort === 'newest') {
+      nodes.push(h('section', { class: 'day', 'aria-labelledby': 'sort-newest' },
+        h('h2', { class: 'day__title', id: 'sort-newest' }, 'Newest'),
+        h('div', { class: 'grid' }, events.map((ev) => renderCard(ev, state))),
       ));
+    } else {
+      for (const g of groupByDay(events, { now: state.now, locale: state.locale })) {
+        const id = `day-${g.key}`;
+        nodes.push(h('section', { class: 'day', 'aria-labelledby': id },
+          h('h2', { class: 'day__title', id }, g.label),
+          h('div', { class: 'grid' }, g.events.map((ev) => renderCard(ev, state))),
+        ));
+      }
     }
+
     if (state.loading) nodes.push(h('p', { class: 'loading', role: 'status' }, 'Loading events…'));
     if (state.hasMore) {
       nodes.push(h('button', {

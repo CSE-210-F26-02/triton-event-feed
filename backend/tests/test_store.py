@@ -9,6 +9,9 @@ from app.models import (
     Listener,
     ListenerRecord,
     Notification,
+    EventRecord,
+    BoundingBox,
+    Location
 )
 from app.seed import seed
 from app.store.sqlite import SqliteStore, to_iso
@@ -213,3 +216,43 @@ def test_seed(store, now):
     assert len(live) >= 2
     assert any(e.record.ends_at - now <= timedelta(hours=1) for e in live)
     assert all(e.record.starts_at < now + timedelta(days=7) for e in page.events)
+
+def test_query_sort_newest_and_pagination(store, make_event, now):
+    for i in range(5):
+        ev = make_event(f"e{i}", start_h=10 - i, end_h=20)
+        rec = ev.record.model_copy(update={"created_at": now + timedelta(minutes=i)})
+        store.upsert_event(ev.model_copy(update={"record": rec}))
+
+    seen: list[str] = []
+    q = EventQuery(sort="newest", limit=2)
+    while True:
+        page = store.query_events(q, now)
+        seen += uris(page)
+        if page.cursor is None:
+            break
+        q = q.model_copy(update={"cursor": page.cursor})
+    assert seen == ["e4", "e3", "e2", "e1", "e0"]
+
+    # Cursor from one sort mode is rejected for the other
+    p = store.query_events(EventQuery(sort="soonest", limit=1), now)
+    with pytest.raises(ValueError):
+        store.query_events(EventQuery(sort="newest", cursor=p.cursor), now)
+
+
+def test_query_bbox_and_antimeridian(store, make_event, now):
+    def at_pos(rkey: str, lat: str | None, lng: str | None):
+        ev = make_event(rkey)
+        rec = ev.record.model_copy(update={"location": Location(name=rkey, lat=lat, lng=lng)})
+        store.upsert_event(ev.model_copy(update={"record": rec}))
+
+    at_pos("ucsd", "32.88", "-117.24")
+    at_pos("downtown", "32.71", "-117.16")
+    at_pos("nocoords", None, None)
+    at_pos("fiji_e", "-18.0", "178.0")
+    at_pos("fiji_w", "-18.0", "-178.0")
+
+    campus = BoundingBox(west=-117.26, south=32.86, east=-117.22, north=32.90)
+    assert uris(store.query_events(EventQuery(bbox=campus), now)) == ["ucsd"]
+
+    dateline = BoundingBox(west=175.0, south=-20.0, east=-175.0, north=-15.0)
+    assert set(uris(store.query_events(EventQuery(bbox=dateline), now))) == {"fiji_e", "fiji_w"}

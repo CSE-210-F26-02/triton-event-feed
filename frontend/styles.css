@@ -127,9 +127,7 @@ input, select, textarea {
 /* Filters */
 .filters { display: grid; gap: 0.5rem; margin-bottom: var(--gap); }
 .filters__row { display: grid; gap: 0.5rem; grid-template-columns: 1fr; }
-@media (min-width: 40rem) {
-  .filters__row { grid-template-columns: 2fr 1fr auto; }
-}
+@media (min-width: 40rem) { .filters__row { grid-template-columns: 2fr 1fr auto auto; } }
 
 .chips {
   display: flex;

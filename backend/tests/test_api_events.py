@@ -86,3 +86,42 @@ def test_tags_and_groups(client, store, make_event):
         {"value": "food", "count": 1},
     ]
     assert client.get("/api/groups").json() == [{"value": "ACM", "count": 2}]
+
+def test_events_sort_tags_bbox_and_etag(client, store, make_event, now):
+    older = make_event("a", tags=["food"], start_h=1, end_h=4)
+    newer_rec = make_event("b", tags=["music"], start_h=5, end_h=8).record.model_copy(
+        update={
+            "created_at": now + timedelta(minutes=10),
+            "location": {"name": "Downtown", "lat": "32.71", "lng": "-117.16"},
+        }
+    )
+    newer = make_event("b", tags=["music"], start_h=5, end_h=8).model_copy(
+        update={"record": newer_rec}
+    )
+    store.upsert_event(older)
+    store.upsert_event(newer)
+
+    # sort=newest
+    newest = client.get("/api/events", params={"sort": "newest"}).json()["events"]
+    assert [e["uri"].rsplit("/", 1)[1] for e in newest] == ["b", "a"]
+
+    # comma-separated tags alias
+    tagged = client.get("/api/events", params={"tags": "food,music"}).json()["events"]
+    assert len(tagged) == 2
+
+    # bbox filter + invalid bbox
+    in_box = client.get("/api/events", params={"bbox": "-117.26,32.86,-117.22,32.90"}).json()
+    assert [e["uri"].rsplit("/", 1)[1] for e in in_box["events"]] == ["a"]
+    assert client.get("/api/events", params={"bbox": "1,2,3"}).status_code == 422
+    assert client.get("/api/events", params={"bbox": "0,50,10,40"}).status_code == 422
+
+    # ETag + 304 Not Modified + invalidation on write
+    r1 = client.get("/api/events")
+    etag = r1.headers["etag"]
+    assert r1.headers["cache-control"] == "no-cache"
+    r2 = client.get("/api/events", headers={"If-None-Match": etag})
+    assert r2.status_code == 304
+
+    store.upsert_event(make_event("c", start_h=2, end_h=3))
+    r3 = client.get("/api/events", headers={"If-None-Match": etag})
+    assert r3.status_code == 200 and r3.headers["etag"] != etag

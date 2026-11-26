@@ -20,7 +20,7 @@ createdAt, indexedAt, updatedAt, status}` where `status` is `upcoming | live | e
 |---|---|---|---|
 | GET | `/api/health` | | `{ok:true}` |
 | GET | `/api/config` | | `{devMode, jetstreamEnabled, eventNsid, listenerNsid}` |
-| GET | `/api/events` | `tag` (repeatable, match any), `group`, `q`, `before`, `after` (ISO), `limit`, `cursor` | `{events:[EventView], cursor}` |
+| GET | `/api/events` | `tag (repeatable) / tags (comma-separated or repeatable, match any), group, q, before, after (ISO), bbox (west,south,east,north), sort (soonest\newest), limit, cursor` | `{events:[EventView], cursor} (sets ETag + Cache-Control: no-cache; honors If-None-Match → 304)` |
 | GET | `/api/event` | `uri` | `EventView & {updates:[{text,sourceUri,createdAt}]}` or 404 |
 | GET | `/api/tags` | | `[{value,count}]` |
 | GET | `/api/groups` | | `[{value,count}]` |

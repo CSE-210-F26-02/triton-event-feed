@@ -13,6 +13,8 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 
+import math
+
 from app.models import (
     Count,
     EventQuery,
@@ -23,6 +25,7 @@ from app.models import (
     ListenerRecord,
     Notification,
     Page,
+    SortOrder
 )
 from app.store.base import UpsertResult
 
@@ -37,11 +40,16 @@ CREATE TABLE IF NOT EXISTS events (
     search TEXT NOT NULL,
     starts_at TEXT NOT NULL,
     ends_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    lat REAL,
+    lng REAL,
     grp TEXT,
     indexed_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS events_order ON events (starts_at, uri);
+CREATE INDEX IF NOT EXISTS events_newest ON events (created_at DESC, uri DESC);
+CREATE INDEX IF NOT EXISTS events_coords ON events (lat, lng);
 CREATE INDEX IF NOT EXISTS events_ends ON events (ends_at);
 CREATE INDEX IF NOT EXISTS events_grp ON events (grp);
 CREATE INDEX IF NOT EXISTS events_author ON events (author_did);
@@ -84,8 +92,17 @@ CREATE TABLE IF NOT EXISTS cursors (
     name TEXT PRIMARY KEY,
     value INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS events_newest ON events (created_at DESC, uri DESC);
+CREATE INDEX IF NOT EXISTS events_coords ON events (lat, lng);
 """
 
+def _coords(rec: EventRecord) -> tuple[float | None, float | None]:
+    if rec.location.lat is None or rec.location.lng is None:
+        return None, None
+    lat, lng = float(rec.location.lat), float(rec.location.lng)
+    if not (math.isfinite(lat) and math.isfinite(lng)):
+        return None, None
+    return lat, lng
 
 def to_iso(dt: datetime) -> str:
     """Fixed-width UTC ISO string (lexicographic order == chronological). Naive = UTC."""
@@ -98,21 +115,20 @@ def from_iso(s: str) -> datetime:
     return datetime.fromisoformat(s)
 
 
-def encode_cursor(starts_at: str, uri: str) -> str:
-    return base64.urlsafe_b64encode(f"{starts_at}|{uri}".encode()).decode()
+def encode_cursor(sort: SortOrder, ts: str, uri: str) -> str:
+    return base64.urlsafe_b64encode(f"{sort}|{ts}|{uri}".encode()).decode()
 
 
-def decode_cursor(cursor: str) -> tuple[str, str]:
-    """Raises ValueError on a malformed cursor."""
+def decode_cursor(cursor: str, expected_sort: SortOrder = "soonest") -> tuple[str, str]:
+    """Raises ValueError on a malformed cursor or sort-mode mismatch."""
     try:
         raw = base64.urlsafe_b64decode(cursor.encode()).decode()
     except (binascii.Error, UnicodeDecodeError) as e:
         raise ValueError("invalid cursor") from e
-    starts_at, sep, uri = raw.partition("|")
-    if not sep or not uri:
+    parts = raw.split("|", 2)
+    if len(parts) != 3 or parts[0] != expected_sort or not parts[2]:
         raise ValueError("invalid cursor")
-    return to_iso(from_iso(starts_at)), uri
-
+    return to_iso(from_iso(parts[1])), parts[2]
 
 def _norm_tag(tag: str) -> str:
     return tag.strip().lstrip("#").lower()
@@ -158,6 +174,7 @@ class SqliteStore:
     def upsert_event(self, ev: IndexedEvent) -> UpsertResult:
         rec = ev.record
         rec_json = _record_json(rec)
+        lat, lng = _coords(rec)
         with self._tx() as c:
             row = c.execute(
                 "SELECT cid, record, indexed_at FROM events WHERE uri = ?", (ev.uri,)
@@ -167,8 +184,9 @@ class SqliteStore:
             indexed_at = row["indexed_at"] if row is not None else to_iso(ev.indexed_at)
             c.execute(
                 "INSERT OR REPLACE INTO events (uri, cid, author_did, author_handle, source,"
-                " record, search, starts_at, ends_at, grp, indexed_at, updated_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " record, search, starts_at, ends_at, created_at, lat, lng, grp,"
+                " indexed_at, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     ev.uri,
                     ev.cid,
@@ -179,6 +197,9 @@ class SqliteStore:
                     _search_text(rec),
                     to_iso(rec.starts_at),
                     to_iso(rec.ends_at),
+                    to_iso(rec.created_at),
+                    lat,
+                    lng,
                     rec.group,
                     indexed_at,
                     to_iso(ev.updated_at),
@@ -221,15 +242,35 @@ class SqliteStore:
         if q.starts_before:
             where.append("starts_at < ?")
             params.append(to_iso(q.starts_before))
-        if q.cursor:
-            after_start, after_uri = decode_cursor(q.cursor)
-            where.append("(starts_at > ? OR (starts_at = ? AND uri > ?))")
-            params += [after_start, after_start, after_uri]
-        sql = f"SELECT * FROM events e WHERE {' AND '.join(where)} ORDER BY starts_at, uri LIMIT ?"
+        if q.bbox is not None:
+            where.append("lat IS NOT NULL AND lng IS NOT NULL")
+            where.append("lat >= ? AND lat <= ?")
+            params += [q.bbox.south, q.bbox.north]
+            if q.bbox.west <= q.bbox.east:
+                where.append("lng >= ? AND lng <= ?")
+                params += [q.bbox.west, q.bbox.east]
+            else:  # crosses antimeridian
+                where.append("(lng >= ? OR lng <= ?)")
+                params += [q.bbox.west, q.bbox.east]
+
+        if q.sort == "newest":
+            if q.cursor:
+                after_created, after_uri = decode_cursor(q.cursor, "newest")
+                where.append("(created_at < ? OR (created_at = ? AND uri < ?))")
+                params += [after_created, after_created, after_uri]
+            order_by, cursor_col = "created_at DESC, uri DESC", "created_at"
+        else:
+            if q.cursor:
+                after_start, after_uri = decode_cursor(q.cursor, "soonest")
+                where.append("(starts_at > ? OR (starts_at = ? AND uri > ?))")
+                params += [after_start, after_start, after_uri]
+            order_by, cursor_col = "starts_at ASC, uri ASC", "starts_at"
+
+        sql = f"SELECT * FROM events e WHERE {' AND '.join(where)} ORDER BY {order_by} LIMIT ?"
         rows = self._all(sql, [*params, q.limit + 1])
         more = len(rows) > q.limit
         rows = rows[: q.limit]
-        cursor = encode_cursor(rows[-1]["starts_at"], rows[-1]["uri"]) if more else None
+        cursor = encode_cursor(q.sort, rows[-1][cursor_col], rows[-1]["uri"]) if more else None
         return Page(events=[_row_to_event(r) for r in rows], cursor=cursor)
 
     def delete_expired(self, cutoff: datetime) -> list[str]:

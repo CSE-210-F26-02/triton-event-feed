@@ -8,7 +8,7 @@
  */
 
 /** @type {FilterState} */
-export const EMPTY_FILTERS = Object.freeze({ tags: [], group: '', q: '', nearMe: false });
+export const EMPTY_FILTERS = Object.freeze({ tags: [], group: '', q: '', nearMe: false, sort: 'soonest' });
 
 /**
  * Build GET /api/events params from filter state. `nearMe` is never sent (privacy).
@@ -16,12 +16,16 @@ export const EMPTY_FILTERS = Object.freeze({ tags: [], group: '', q: '', nearMe:
  * @param {{cursor?: string|null, limit?: number}} [page]
  * @returns {Record<string, any>}
  */
-export function buildEventQuery(filters, { cursor = null, limit = 20 } = {}) {
+export function buildEventQuery(filters, { cursor = null, limit = 20, bbox = null } = {}) {
   const params = { limit };
   if (filters.tags?.length) params.tag = [...filters.tags];
   if (filters.group) params.group = filters.group;
   const q = (filters.q || '').trim();
   if (q) params.q = q;
+  if (filters.sort && filters.sort !== 'soonest') params.sort = filters.sort;
+  if (bbox) {
+    params.bbox = typeof bbox === 'string' ? bbox : `${bbox.west},${bbox.south},${bbox.east},${bbox.north}`;
+  }
   if (cursor) params.cursor = cursor;
   return params;
 }

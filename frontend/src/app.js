@@ -79,7 +79,7 @@ export async function start({ baseUrl = $('meta[name="cm-api-base"]')?.content ?
     }
     if (!filters.nearMe) geo.clear();
     store.set({ filters });
-    const refetch = ['tags', 'group', 'q'].some((k) => k in patch);
+    const refetch = ['tags', 'group', 'q', 'sort'].some((k) => k in patch);
     if (refetch) loadEvents();
   }
 
@@ -135,6 +135,7 @@ export async function start({ baseUrl = $('meta[name="cm-api-base"]')?.content ?
       onOpen: (uri) => detail.open(uri),
       onTagClick: (tag) => changeFilters({ tags: toggleTag(store.get().filters.tags, tag) }),
       onToggleSubscribe: toggleSubscribe,
+      sort: s.filters.sort
     });
     if (s.tab === 'map') map.show(shown);
   }

@@ -12,6 +12,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
+import math
+
 EVENT_NSID = "app.communitymap.event"
 LISTENER_NSID = "app.communitymap.listener"
 POST_NSID = "app.bsky.feed.post"
@@ -137,3 +139,47 @@ class Page(_Camel):
 class Count(_Camel):
     value: str
     count: int
+
+SortOrder = Literal["soonest", "newest"]
+
+
+class BoundingBox(_Camel):
+    """Geographic bounds in west,south,east,north (minLng,minLat,maxLng,maxLat) order."""
+
+    west: float
+    south: float
+    east: float
+    north: float
+
+    @model_validator(mode="after")
+    def _bounds(self) -> BoundingBox:
+        if not all(math.isfinite(v) for v in (self.west, self.south, self.east, self.north)):
+            raise ValueError("bbox coordinates must be finite numbers")
+        if not (-90.0 <= self.south <= self.north <= 90.0):
+            raise ValueError("bbox latitudes must satisfy -90 <= south <= north <= 90")
+        if not (-180.0 <= self.west <= 180.0 and -180.0 <= self.east <= 180.0):
+            raise ValueError("bbox longitudes must be between -180 and 180")
+        return self
+
+    @classmethod
+    def from_param(cls, raw: str) -> BoundingBox:
+        parts = [p.strip() for p in raw.split(",")]
+        if len(parts) != 4:
+            raise ValueError("bbox must be 'west,south,east,north'")
+        try:
+            west, south, east, north = (float(p) for p in parts)
+        except ValueError as e:
+            raise ValueError("bbox values must be numbers") from e
+        return cls(west=west, south=south, east=east, north=north)
+
+
+class EventQuery(_Camel):
+    tags: list[str] = Field(default_factory=list)  # match ANY of these tags
+    group: str | None = None
+    text: str | None = None  # case-insensitive substring over name/description/location
+    starts_before: datetime | None = None
+    ends_after: datetime | None = None  # default: now (hide expired)
+    bbox: BoundingBox | None = None
+    sort: SortOrder = "soonest"
+    limit: int = Field(default=20, ge=1, le=100)
+    cursor: str | None = None  # opaque, from Page.cursor

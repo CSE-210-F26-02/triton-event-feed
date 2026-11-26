@@ -16,7 +16,7 @@ import { debounce } from '../util.js';
  *   nearMeBusy?: boolean}): void}}
  */
 export function createFilterBar(root, { onChange, debounceMs = 300, geoSupported = true }) {
-  let state = { tags: [], group: '', q: '', nearMe: false };
+  let state = { tags: [], group: '', q: '', nearMe: false, sort: 'soonest' };
   const emitQ = debounce((q) => onChange({ q }), debounceMs);
 
   const search = h('input', {
@@ -24,6 +24,10 @@ export function createFilterBar(root, { onChange, debounceMs = 300, geoSupported
     oninput: (e) => emitQ(e.target.value),
   });
   const group = h('select', { id: 'f-group', name: 'group', onchange: (e) => onChange({ group: e.target.value }) });
+  const sort = h('select', { id: 'f-sort', name: 'sort', onchange: (e) => onChange({ sort: e.target.value }) },
+    h('option', { value: 'soonest' }, 'Soonest'),
+    h('option', { value: 'newest' }, 'Newest'),
+  );
   const nearMe = h('button', {
     type: 'button', class: 'btn', 'aria-pressed': 'false', hidden: !geoSupported,
     onclick: () => onChange({ nearMe: !state.nearMe }),
@@ -34,6 +38,7 @@ export function createFilterBar(root, { onChange, debounceMs = 300, geoSupported
     h('div', { class: 'filters__row' },
       h('label', { for: 'f-q', class: 'visually-hidden' }, 'Search events'), search,
       h('label', { for: 'f-group', class: 'visually-hidden' }, 'Group'), group,
+      h('label', { for: 'f-sort', class: 'visually-hidden' }, 'Sort events'), sort,
       nearMe,
     ),
     chips,
@@ -43,6 +48,7 @@ export function createFilterBar(root, { onChange, debounceMs = 300, geoSupported
     state = next;
     if (document.activeElement !== search && search.value !== next.q) search.value = next.q;
     renderGroups(groups, next.group);
+    sort.value = next.sort || 'soonest';
     nearMe.setAttribute('aria-pressed', String(next.nearMe));
     nearMe.textContent = nearMeBusy ? 'Locating…' : 'Near me';
     renderChips(tags, next.tags);
