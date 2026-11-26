@@ -1,0 +1,86 @@
+{
+  "lexicon": 1,
+  "id": "app.communitymap.event",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "description": "A time-bounded community event at a physical location.",
+      "record": {
+        "type": "object",
+        "required": ["name", "startsAt", "endsAt", "location", "createdAt"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "maxGraphemes": 100
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 30000,
+            "maxGraphemes": 3000
+          },
+          "startsAt": {
+            "type": "string",
+            "format": "datetime"
+          },
+          "endsAt": {
+            "type": "string",
+            "format": "datetime",
+            "description": "Must be after startsAt. Event is hidden after this time."
+          },
+          "location": {
+            "type": "ref",
+            "ref": "#location"
+          },
+          "tags": {
+            "type": "array",
+            "maxLength": 10,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 320,
+              "maxGraphemes": 32
+            }
+          },
+          "group": {
+            "type": "ref",
+            "ref": "com.atproto.repo.strongRef",
+            "description": "The group this event belongs to (app.communitymap.group record)."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    },
+    "location": {
+      "type": "object",
+      "required": ["lat", "lng"],
+      "properties": {
+        "lat": {
+          "type": "string",
+          "maxLength": 16,
+          "description": "Decimal degrees as a string, -90 to 90, e.g. \"32.8801\"."
+        },
+        "lng": {
+          "type": "string",
+          "maxLength": 16,
+          "description": "Decimal degrees as a string, -180 to 180."
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 1000,
+          "maxGraphemes": 100
+        },
+        "address": {
+          "type": "string",
+          "maxLength": 3000,
+          "maxGraphemes": 300
+        }
+      }
+    }
+  }
+}
