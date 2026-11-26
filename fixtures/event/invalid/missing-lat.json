@@ -1,0 +1,14 @@
+{
+  "description": "location is present but its required lat is missing.",
+  "expectedErrorContains": "lat",
+  "record": {
+    "$type": "app.communitymap.event",
+    "name": "Study Jam at Geisel Library",
+    "startsAt": "2026-12-01T18:00:00.000Z",
+    "endsAt": "2026-12-01T21:00:00.000Z",
+    "location": {
+      "lng": "-117.2375"
+    },
+    "createdAt": "2026-11-20T09:30:00.000Z"
+  }
+}
