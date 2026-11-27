@@ -9,7 +9,11 @@ def resolver(
     handler: httpx.MockTransport, clock: list[float] | None = None, **kw: object
 ) -> HandleResolver:
     t = clock if clock is not None else [0.0]
-    return HandleResolver(httpx.AsyncClient(transport=handler), clock=lambda: t[0], **kw)  # type: ignore[arg-type]
+    return HandleResolver(
+    httpx.AsyncClient(transport=handler),
+    clock=lambda: t[0],
+    **kw,  # type: ignore[arg-type]
+    )
 
 
 def doc(handle: str) -> dict[str, object]:

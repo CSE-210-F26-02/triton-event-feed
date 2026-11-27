@@ -6,14 +6,16 @@
   "scripts": {
     "dev": "vite",
     "test": "vitest run",
-    "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
+    "lint": "eslint .",
     "format": "prettier --write .",
     "format-check": "prettier --check ."
   },
   "author": "CSE 210 Team 2",
   "license": "ISC",
   "devDependencies": {
-    "eslint": "^10.15.0",
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.16.0",
+    "globals": "^17.14.0",
     "jsdom": "^29.1.1",
     "prettier": "^3.10.1",
     "vite": "^8.3.8",

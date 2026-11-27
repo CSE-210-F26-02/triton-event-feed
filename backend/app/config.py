@@ -14,7 +14,8 @@ class Settings(BaseSettings):
     dev_mode: bool = False
     # Seconds between expiry sweeps; events are dropped once endsAt + grace has passed.
     expiry_interval_s: int = 60
-    expiry_grace_s: int = 0 #change depending on how long we want it, 0 for now to test
+    #change depending on how long we want it, 0 for now to test
+    expiry_grace_s: int = 0
     expiry_purge_days: int = 7
     # Comma-separated iCal URLs polled every ical_interval_s.
     ical_feeds: str = ""

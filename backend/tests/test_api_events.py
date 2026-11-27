@@ -1,6 +1,6 @@
 from datetime import timedelta
 
-from app.models import EventUpdate
+from app.models import EventUpdate, Location
 
 
 def test_health_and_config(client):
@@ -87,12 +87,13 @@ def test_tags_and_groups(client, store, make_event):
     ]
     assert client.get("/api/groups").json() == [{"value": "ACM", "count": 2}]
 
+
 def test_events_sort_tags_bbox_and_etag(client, store, make_event, now):
     older = make_event("a", tags=["food"], start_h=1, end_h=4)
     newer_rec = make_event("b", tags=["music"], start_h=5, end_h=8).record.model_copy(
         update={
             "created_at": now + timedelta(minutes=10),
-            "location": {"name": "Downtown", "lat": "32.71", "lng": "-117.16"},
+            "location": Location(name="Downtown", lat="32.71", lng="-117.16"),
         }
     )
     newer = make_event("b", tags=["music"], start_h=5, end_h=8).model_copy(

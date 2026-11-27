@@ -6,13 +6,13 @@ Lexicon record JSON is camelCase; Python attributes are snake_case. Use
 
 from __future__ import annotations
 
+import math
+
 from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
-
-import math
 
 EVENT_NSID = "app.communitymap.event"
 LISTENER_NSID = "app.communitymap.listener"
@@ -120,17 +120,6 @@ class Notification(_Camel):
     message: str
     created_at: datetime
 
-
-class EventQuery(_Camel):
-    tags: list[str] = Field(default_factory=list)  # match ANY of these tags
-    group: str | None = None
-    text: str | None = None  # case-insensitive substring over name/description/location
-    starts_before: datetime | None = None
-    ends_after: datetime | None = None  # default: now (hide expired)
-    limit: int = Field(default=20, ge=1, le=100)
-    cursor: str | None = None  # opaque, from Page.cursor
-
-
 class Page(_Camel):
     events: list[IndexedEvent]
     cursor: str | None = None
@@ -139,6 +128,7 @@ class Page(_Camel):
 class Count(_Camel):
     value: str
     count: int
+
 
 SortOrder = Literal["soonest", "newest"]
 

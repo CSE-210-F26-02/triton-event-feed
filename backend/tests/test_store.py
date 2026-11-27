@@ -3,15 +3,14 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.models import (
+    BoundingBox,
     Count,
     EventQuery,
     EventUpdate,
     Listener,
     ListenerRecord,
+    Location,
     Notification,
-    EventRecord,
-    BoundingBox,
-    Location
 )
 from app.seed import seed
 from app.store.sqlite import SqliteStore, to_iso
@@ -216,6 +215,7 @@ def test_seed(store, now):
     assert len(live) >= 2
     assert any(e.record.ends_at - now <= timedelta(hours=1) for e in live)
     assert all(e.record.starts_at < now + timedelta(days=7) for e in page.events)
+
 
 def test_query_sort_newest_and_pagination(store, make_event, now):
     for i in range(5):
