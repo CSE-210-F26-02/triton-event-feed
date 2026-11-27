@@ -2,6 +2,7 @@
  * Hash-based routing so every event has a shareable URL that works on static hosting
  * (no server rewrites needed). Event routes look like `#/event/<did>/<rkey>`; the
  * collection is always EVENT_NSID, so the AT URI can be rebuilt from the hash alone.
+ * `#/subscriptions` is the signed-in user's "My subscriptions" page (#19).
  * Hashes that are not routes (e.g. the "#main" skip link) are ignored.
  * @module router
  */
@@ -10,8 +11,12 @@ import { EVENT_NSID, parseAtUri } from "./records.js";
 /** Prefix shared by all event routes. */
 export const EVENT_ROUTE_PREFIX = "#/event/";
 
+/** Hash of the "My subscriptions" page (#19). */
+export const SUBSCRIPTIONS_ROUTE = "#/subscriptions";
+
 /**
- * @typedef {{view: "list"} | {view: "event", uri: string|null}} Route
+ * @typedef {{view: "list"} | {view: "event", uri: string|null} |
+ *   {view: "subscriptions"}} Route
  * `uri: null` means the hash looked like an event route but could not be parsed.
  */
 
@@ -54,6 +59,7 @@ export function eventHash(eventUri) {
  */
 export function parseHash(hash = "") {
   if (hash === "" || hash === "#" || hash === "#/") return { view: "list" };
+  if (hash === SUBSCRIPTIONS_ROUTE) return { view: "subscriptions" };
   if (!hash.startsWith(EVENT_ROUTE_PREFIX)) return null;
   const segments = hash.slice(EVENT_ROUTE_PREFIX.length).split("/");
   if (segments.length !== 2) return { view: "event", uri: null };
@@ -79,7 +85,8 @@ export function shareUrl(eventUri, location = globalThis.location) {
 /**
  * Create the router. Calls `onChange(route)` on start and on every route change.
  * @param {{onChange: (route: Route) => void, win?: Window}} deps
- * @returns {{start(): void, openEvent(uri: string): void, home(): void, current(): Route}}
+ * @returns {{start(): void, openEvent(uri: string): void, openSubscriptions(): void,
+ *   home(): void, current(): Route}}
  */
 export function createRouter({ onChange, win = globalThis.window }) {
   let route = { view: "list" };
@@ -102,6 +109,12 @@ export function createRouter({ onChange, win = globalThis.window }) {
       const hash = eventHash(uri);
       if (hash && win.location.hash !== hash) win.location.hash = hash;
       else if (hash) sync();
+    },
+    /** Navigate to "My subscriptions" (re-syncs when already there). */
+    openSubscriptions() {
+      if (win.location.hash !== SUBSCRIPTIONS_ROUTE)
+        win.location.hash = SUBSCRIPTIONS_ROUTE;
+      else sync();
     },
     /** Navigate back to the list/map, leaving a clean URL (no trailing "#"). */
     home() {

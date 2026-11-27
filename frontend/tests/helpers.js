@@ -28,7 +28,8 @@ export function jsonResponse(body, status = 200, headers = {}) {
 /** AppView metadata the backend adds around a lexicon record to form an EventView. */
 const APPVIEW_METADATA = Object.freeze({
   uri: "at://did:plc:host/app.communitymap.event/3lexicon",
-  cid: "bafy-lexicon",
+  // A well-formed CID: subscriptions copy it into their strongRef, which is validated.
+  cid: "bafyreihooyosut5ztb3xty23uwoyij5ovnqr5qldanntxmah33quatfwoy",
   authorDid: "did:plc:host",
   authorHandle: "host.test",
   source: "atproto",
@@ -77,4 +78,46 @@ export function sampleEvent(over = {}) {
     status: "upcoming",
     ...over,
   };
+}
+
+/**
+ * Frontend env used by every test, so tests never depend on a developer's .env.
+ * Same shape as frontend/.env.example; hosts are .test so nothing real is contacted.
+ */
+export const TEST_ENV = Object.freeze({
+  VITE_API_BASE_URL: "",
+  VITE_ATPROTO_PLC_DIRECTORY_URL: "https://plc.directory",
+  VITE_ATPROTO_HANDLE_RESOLVER_URLS:
+    "https://public.api.bsky.app,https://bsky.social",
+  VITE_LEAFLET_JS_URL: "https://leaflet.test/leaflet.js",
+  VITE_LEAFLET_CSS_URL: "https://leaflet.test/leaflet.css",
+  VITE_MAP_TILE_URL: "https://tiles.test/{z}/{x}/{y}.png",
+  VITE_MAP_TILE_ATTRIBUTION: "&copy; Test tiles",
+  VITE_MAP_MAX_ZOOM: "19",
+  VITE_MAP_CENTER_LAT: "32.8801",
+  VITE_MAP_CENTER_LNG: "-117.234",
+  VITE_MAP_DEFAULT_ZOOM: "15",
+  // ?mock demo mode only (stubs/mockPds.js).
+  VITE_MOCK_PDS_ACCESS_TOKEN_PREFIX: "test-access-",
+  VITE_MOCK_PDS_REFRESH_TOKEN_PREFIX: "test-refresh-",
+});
+
+/**
+ * The validated config for TEST_ENV (with optional env overrides).
+ * @param {Record<string, string>} [overrides]
+ * @returns {import('../src/config.js').AppConfig}
+ */
+export async function testConfig(overrides = {}) {
+  const { loadConfig } = await import("../src/config.js");
+  return loadConfig({ ...TEST_ENV, ...overrides });
+}
+
+/**
+ * The validated ?mock config (fake token prefixes) for TEST_ENV.
+ * @param {Record<string, string>} [overrides]
+ * @returns {Promise<import('../src/config.js').MockConfig>}
+ */
+export async function testMockConfig(overrides = {}) {
+  const { loadMockConfig } = await import("../src/config.js");
+  return loadMockConfig({ ...TEST_ENV, ...overrides });
 }

@@ -12,11 +12,11 @@ import { storageGet, storageSet, getStorage } from "../util.js";
 /** Collection the mock groups live in (the group lexicon itself is still #17). */
 const GROUP_NSID = "app.communitymap.group";
 /**
- * A well-formed CID for every mock group strongRef (the lexicon validates the format);
- * the same value as fixtures/event/valid/full.json. The mock never resolves it.
+ * A well-formed CID for every mock event and group strongRef (the lexicon validates the
+ * format, and subscriptions copy the event's CID); the same value as
+ * fixtures/event/valid/full.json. The mock never resolves it.
  */
-const MOCK_GROUP_CID =
-  "bafyreihooyosut5ztb3xty23uwoyij5ovnqr5qldanntxmah33quatfwoy";
+const MOCK_CID = "bafyreihooyosut5ztb3xty23uwoyij5ovnqr5qldanntxmah33quatfwoy";
 const DEMO_DID_KEY = "cm:demo-did"; // same key devWriter uses, so you "own" one event
 
 /**
@@ -50,7 +50,7 @@ function demoDid() {
  */
 const mockGroupRef = (did, rkey) => ({
   uri: `at://${did}/${GROUP_NSID}/${rkey}`,
-  cid: MOCK_GROUP_CID,
+  cid: MOCK_CID,
 });
 
 /**
@@ -61,7 +61,7 @@ const mockGroupRef = (did, rkey) => ({
 function mockEvent({ did, rkey, ...fields }) {
   return {
     uri: `at://${did}/${EVENT_NSID}/${rkey}`,
-    cid: `bafy-mock-${rkey}`,
+    cid: MOCK_CID,
     authorDid: did,
     source: "atproto",
     sourceUrl: null,
@@ -189,7 +189,6 @@ const respond = (body, status = 200) =>
  */
 export function createMockFetch() {
   const events = mockEvents();
-  const subscribed = new Set();
 
   const handlers = {
     "/api/config": () =>
@@ -210,14 +209,6 @@ export function createMockFetch() {
           events.map((ev) => describeGroup(ev.group)?.label).filter(Boolean),
         ),
       ),
-    "/api/subscriptions": (params, init) => {
-      if (!init?.method || init.method === "GET")
-        return respond([...subscribed]);
-      const { eventUri } = JSON.parse(init.body);
-      if (init.method === "POST") subscribed.add(eventUri);
-      else subscribed.delete(eventUri);
-      return respond({ ok: true });
-    },
     "/api/notifications": () => respond([]),
     "/api/dev/records": () => respond({ ok: true }),
   };

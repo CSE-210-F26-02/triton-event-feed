@@ -1,211 +1,204 @@
 /**
- * Anonymous event subscriptions + live notifications (SSE with reconnect and catch-up).
+ * Event subscriptions (#19), stored as app.communitymap.subscription records on the
+ * subscriber's own PDS: subscribing is createRecord, unsubscribing is deleteRecord, and
+ * the list comes from com.atproto.repo.listRecords. Because the records live on the PDS,
+ * subscriptions survive reloads and follow the user to other devices and apps.
+ *
+ * Reading the PDS directly means this works before the indexer (#5) exists. Once #5
+ * ingests the same records, the backend will know who to notify; nothing here changes.
+ * Records that break the lexicon (e.g. written by another app) are ignored.
  * @module subscriptions
  */
-import { getStorage, randomId, storageGet, storageSet } from "./util.js";
+import { isEnded } from "./filters.js";
+import { isPlainObject } from "./lexicon/eventView.js";
+import {
+  buildSubscriptionRecord,
+  validateSubscription,
+} from "./lexicon/validateSubscription.js";
+import { parseAtUri } from "./records.js";
 
-const ID_KEY = "cm:subscriber-id";
-const LAST_KEY = "cm:last-notification-id";
-const ASKED_KEY = "cm:notify-asked";
+/** Why a subscribe / unsubscribe request was refused before reaching the PDS. */
+export const SUBSCRIPTION_ERROR = Object.freeze({
+  loginRequired: "login-required",
+  eventEnded: "event-ended",
+  invalidEvent: "invalid-event",
+});
 
-/**
- * Get (or create and persist) the anonymous subscriber id.
- * @param {Storage|null} storage
- * @returns {string}
- */
-export function getSubscriberId(storage) {
-  let id = storageGet(storage, ID_KEY);
-  if (!id) {
-    id = globalThis.crypto?.randomUUID?.() ?? randomId(24);
-    storageSet(storage, ID_KEY, id);
+/** Error with a SUBSCRIPTION_ERROR `code`, so the UI can pick the right message. */
+export class SubscriptionError extends Error {
+  /**
+   * @param {string} code one of SUBSCRIPTION_ERROR
+   * @param {string} message
+   * @param {import('./lexicon/registry.js').ValidationIssue[]} [issues]
+   */
+  constructor(code, message, issues = []) {
+    super(message);
+    this.name = "SubscriptionError";
+    this.code = code;
+    this.issues = issues;
   }
-  return id;
 }
 
 /**
- * Pure catch-up merge: keep notifications newer than `lastId`, sorted by id, deduped.
- * @param {number|null} lastId
- * @param {{id: number}[]} list
- * @returns {{fresh: object[], lastId: number|null}}
+ * The part of a PDS writer this module needs (createAtprotoWriter implements it).
+ * @typedef {object} SubscriptionRepo
+ * @property {string} did the logged-in user's DID
+ * @property {() => Promise<import('./atproto.js').ListedRecord[]>} listSubscriptions
+ * @property {(record: object) => Promise<{uri: string, cid: string}>} createSubscription
+ * @property {(rkey: string) => Promise<unknown>} deleteSubscription
  */
-export function mergeNotifications(lastId, list) {
-  const seen = new Set();
-  const fresh = (list || [])
-    .filter(
-      (n) => typeof n.id === "number" && (lastId == null || n.id > lastId),
-    )
-    .filter((n) => !seen.has(n.id) && seen.add(n.id))
-    .sort((a, b) => a.id - b.id);
-  const next = fresh.length ? fresh[fresh.length - 1].id : lastId;
-  return { fresh, lastId: next };
-}
 
 /**
- * Backoff delay for reconnect attempt `n` (0-based): 1s, 2s, 4s… capped.
- * @param {number} n @param {number} [baseMs] @param {number} [maxMs]
- * @returns {number}
+ * Pure: turn listed subscription records into eventUri → [subscription record keys].
+ * An event can have several records (e.g. subscribed from two tabs at once); all are
+ * kept so unsubscribing removes every one. Invalid records are counted, not kept.
+ * @param {unknown} listed com.atproto.repo.listRecords entries
+ * @returns {{byEvent: Map<string, string[]>, skipped: number}}
  */
-export function backoffMs(n, baseMs = 1000, maxMs = 30000) {
-  return Math.min(maxMs, baseMs * 2 ** n);
+export function indexSubscriptionRecords(listed) {
+  const byEvent = new Map();
+  let skipped = 0;
+  for (const entry of Array.isArray(listed) ? listed : []) {
+    const rkey = parseAtUri(entry?.uri)?.rkey;
+    if (!rkey || !validateSubscription(entry.value).ok) {
+      skipped++;
+      continue;
+    }
+    const eventUri = entry.value.subject.uri;
+    byEvent.set(eventUri, [...(byEvent.get(eventUri) ?? []), rkey]);
+  }
+  return { byEvent, skipped };
 }
 
 /**
- * @param {{api: ReturnType<typeof import('./api.js').createApi>,
- *   storage?: Storage|null, EventSourceImpl?: typeof EventSource|null,
- *   NotificationImpl?: typeof Notification|null, toast?: (msg: string) => void,
- *   onNotification?: (n: object) => void, onChange?: (subscribed: Set<string>) => void,
- *   baseDelayMs?: number}} opts
+ * Check an event can be subscribed to and build its validated record.
+ * @param {unknown} event EventView
+ * @param {Date} now
+ * @returns {object} app.communitymap.subscription record
+ * @throws {SubscriptionError} eventEnded or invalidEvent
+ */
+function subscriptionRecordFor(event, now) {
+  if (!isPlainObject(event))
+    throw new SubscriptionError(
+      SUBSCRIPTION_ERROR.invalidEvent,
+      "That event could not be found.",
+    );
+  if (isEnded(event, now))
+    throw new SubscriptionError(
+      SUBSCRIPTION_ERROR.eventEnded,
+      "This event has ended, so it can't be subscribed to.",
+    );
+  const record = buildSubscriptionRecord(event, now.toISOString());
+  const result = validateSubscription(record);
+  if (!result.ok)
+    throw new SubscriptionError(
+      SUBSCRIPTION_ERROR.invalidEvent,
+      "This event can't be subscribed to right now.",
+      result.errors,
+    );
+  return record;
+}
+
+/**
+ * Create the subscription store.
+ * @param {{getRepo: () => SubscriptionRepo|null, onChange?: (subscribed: Set<string>) => void,
+ *   now?: () => Date}} deps `getRepo` returns the logged-in PDS writer, or null when
+ *   logged out
+ * @returns {{load(): Promise<void>, subscribe(event: object): Promise<boolean>,
+ *   unsubscribe(uri: string): Promise<boolean>, toggle(event: object): Promise<boolean>,
+ *   clear(): void, has(uri: string): boolean, readonly subscribed: Set<string>,
+ *   readonly ownerDid: string|null}}
  */
 export function createSubscriptions({
-  api,
-  storage = getStorage("localStorage"),
-  EventSourceImpl = globalThis.EventSource ?? null,
-  NotificationImpl = globalThis.Notification ?? null,
-  toast = () => {},
-  onNotification = () => {},
+  getRepo,
   onChange = () => {},
-  baseDelayMs = 1000,
+  now = () => new Date(),
 }) {
-  const subscriberId = getSubscriberId(storage);
-  const subscribed = new Set();
-  let lastId = parseLast(storageGet(storage, LAST_KEY));
-  let source = null;
-  let attempts = 0;
-  let timer = null;
+  let byEvent = new Map();
+  let ownerDid = null;
+  let loadSequence = 0;
+  const pending = new Set(); // event URIs with a request in flight
 
-  function parseLast(v) {
-    const n = v == null ? NaN : Number(v);
-    return Number.isFinite(n) ? n : null;
+  const changed = () => onChange(new Set(byEvent.keys()));
+
+  function requireRepo() {
+    const repo = getRepo();
+    if (repo) return repo;
+    throw new SubscriptionError(
+      SUBSCRIPTION_ERROR.loginRequired,
+      "Log in to subscribe to events.",
+    );
   }
 
-  function setLast(id) {
-    lastId = id;
-    storageSet(storage, LAST_KEY, id == null ? null : String(id));
+  /** Replace local state with the logged-in user's records (empty when logged out). */
+  async function load() {
+    const sequence = ++loadSequence;
+    const repo = getRepo();
+    const listed = repo ? await repo.listSubscriptions() : [];
+    if (sequence !== loadSequence) return; // a newer load / clear won
+    byEvent = indexSubscriptionRecords(listed).byEvent;
+    ownerDid = repo?.did ?? null;
+    changed();
   }
 
-  function deliver(n) {
-    toast(n.message);
-    const hidden = globalThis.document?.hidden;
-    if (hidden && NotificationImpl?.permission === "granted") {
-      try {
-        new NotificationImpl("Community Map", {
-          body: n.message,
-          tag: `cm-${n.id}`,
-        });
-      } catch {
-        /* some platforms only allow notifications from a service worker */
-      }
-    }
-    onNotification(n);
-  }
-
-  function handle(list) {
-    const { fresh, lastId: next } = mergeNotifications(lastId, list);
-    setLast(next);
-    fresh.forEach(deliver);
-  }
-
-  /** Fetch notifications missed while disconnected. First run only records a baseline. */
-  async function catchUp() {
+  /** Subscribe to `event` (no-op when already subscribed). Resolves to true. */
+  async function subscribe(event) {
+    const repo = requireRepo();
+    const uri = event?.uri;
+    if (byEvent.has(uri) || pending.has(uri)) return true;
+    const record = subscriptionRecordFor(event, now());
+    pending.add(uri);
     try {
-      const { data } = await api.notifications(subscriberId, lastId);
-      if (lastId == null) {
-        setLast(mergeNotifications(null, data).lastId ?? 0);
-        return;
-      }
-      handle(data);
-    } catch {
-      /* offline; next reconnect retries */
+      const created = await repo.createSubscription(record);
+      const rkey = parseAtUri(created?.uri)?.rkey;
+      if (rkey) byEvent.set(uri, [rkey]);
+      else await load(); // created, but the PDS gave no URI: re-list to learn its rkey
+    } finally {
+      pending.delete(uri);
     }
+    changed();
+    return true;
   }
 
-  function connect() {
-    if (!EventSourceImpl || source || subscribed.size === 0) return;
-    clearTimeout(timer);
-    source = new EventSourceImpl(api.notificationStreamUrl(subscriberId));
-    source.onopen = () => {
-      attempts = 0;
-      catchUp();
-    };
-    source.onmessage = (ev) => {
-      try {
-        handle([JSON.parse(ev.data)]);
-      } catch {
-        /* ignore malformed message */
-      }
-    };
-    source.onerror = () => {
-      disconnect();
-      timer = setTimeout(connect, backoffMs(attempts++, baseDelayMs));
-    };
-  }
-
-  function disconnect() {
-    clearTimeout(timer);
-    if (source) source.close();
-    source = null;
-  }
-
-  async function askPermissionOnce() {
-    if (!NotificationImpl || NotificationImpl.permission !== "default") return;
-    if (storageGet(storage, ASKED_KEY)) return;
-    storageSet(storage, ASKED_KEY, "1");
+  /** Delete every subscription record for `uri`. Resolves to false (not subscribed). */
+  async function unsubscribe(uri) {
+    const repo = requireRepo();
+    if (pending.has(uri)) return byEvent.has(uri);
+    pending.add(uri);
     try {
-      await NotificationImpl.requestPermission();
-    } catch {
-      /* ignore */
+      for (const rkey of [...(byEvent.get(uri) ?? [])]) {
+        await repo.deleteSubscription(rkey);
+        const left = byEvent.get(uri)?.filter((key) => key !== rkey) ?? [];
+        if (left.length) byEvent.set(uri, left);
+        else byEvent.delete(uri);
+      }
+    } finally {
+      pending.delete(uri);
+      changed();
     }
-  }
-
-  function changed() {
-    onChange(new Set(subscribed));
-    if (subscribed.size) connect();
-    else disconnect();
+    return false;
   }
 
   return {
-    subscriberId,
-    /** @returns {Set<string>} copy of subscribed event URIs */
+    load,
+    subscribe,
+    unsubscribe,
+    /** Subscribe, or unsubscribe when already subscribed. Resolves to the new state. */
+    toggle: (event) =>
+      byEvent.has(event?.uri) ? unsubscribe(event.uri) : subscribe(event),
+    /** Forget everything (on logout); cancels an in-flight load. */
+    clear() {
+      loadSequence++;
+      byEvent = new Map();
+      ownerDid = null;
+      changed();
+    },
+    has: (uri) => byEvent.has(uri),
     get subscribed() {
-      return new Set(subscribed);
+      return new Set(byEvent.keys());
     },
-    /** @param {string} uri @returns {boolean} */
-    has: (uri) => subscribed.has(uri),
-    /** Load the server's subscription list and connect the stream if needed. */
-    async load() {
-      try {
-        const { data } = await api.listSubscriptions(subscriberId);
-        subscribed.clear();
-        (data || []).forEach((u) => subscribed.add(u));
-      } catch {
-        /* offline with no cache */
-      }
-      changed();
+    get ownerDid() {
+      return ownerDid;
     },
-    /**
-     * Toggle a subscription. Asks for Notification permission on the very first subscribe.
-     * @param {string} uri
-     * @returns {Promise<boolean>} new subscribed state
-     */
-    async toggle(uri) {
-      if (subscribed.has(uri)) {
-        await api.unsubscribe(subscriberId, uri);
-        subscribed.delete(uri);
-      } else {
-        await api.subscribe(subscriberId, uri);
-        subscribed.add(uri);
-        askPermissionOnce();
-      }
-      changed();
-      return subscribed.has(uri);
-    },
-    /** Reconnect immediately (e.g. on the window "online" event). */
-    reconnectNow() {
-      attempts = 0;
-      disconnect();
-      connect();
-    },
-    catchUp,
-    disconnect,
   };
 }

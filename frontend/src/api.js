@@ -145,16 +145,10 @@ export function createApi({
     tags: () => get("/api/tags"),
     /** @returns {Promise<GetResult>} `[{value,count}]` */
     groups: () => get("/api/groups"),
-    /** @param {string} subscriberId @param {string} eventUri */
-    subscribe: (subscriberId, eventUri) =>
-      send("POST", "/api/subscriptions", { subscriberId, eventUri }),
-    /** @param {string} subscriberId @param {string} eventUri */
-    unsubscribe: (subscriberId, eventUri) =>
-      send("DELETE", "/api/subscriptions", { subscriberId, eventUri }),
-    /** @param {string} subscriberId @returns {Promise<GetResult>} `[eventUri]` */
-    listSubscriptions: (subscriberId) =>
-      get("/api/subscriptions", { subscriberId }),
+    // Subscriptions (#19) are app.communitymap.subscription records on the user's PDS
+    // (see atproto.js / subscriptions.js), so there are no subscription endpoints here.
     /**
+     * STUB(#5): not served by the backend yet. `subscriberId` is the subscriber's DID.
      * @param {string} subscriberId @param {number|null} [since] notification id
      * @returns {Promise<GetResult>} `[Notification]` (never served from cache)
      */

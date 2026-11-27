@@ -30,7 +30,6 @@ describe("api", () => {
     await api.getEvent("at://x/y/z");
     await api.tags();
     await api.groups();
-    await api.listSubscriptions("s1");
     await api.notifications("s1", 7);
     const urls = f.mock.calls.map((c) => c[0]);
     expect(urls).toEqual([
@@ -39,7 +38,6 @@ describe("api", () => {
       "/api/event?uri=at%3A%2F%2Fx%2Fy%2Fz",
       "/api/tags",
       "/api/groups",
-      "/api/subscriptions?subscriberId=s1",
       "/api/notifications?subscriberId=s1&since=7",
     ]);
     expect(api.notificationStreamUrl("s 1")).toBe(
@@ -50,9 +48,7 @@ describe("api", () => {
   it("sends JSON bodies for writes and handles 204", async () => {
     const f = vi.fn(async () => jsonResponse(undefined, 204));
     const api = mk(f);
-    expect(await api.subscribe("s1", "at://e")).toBeNull();
-    await api.unsubscribe("s1", "at://e");
-    await api.importIcal("https://cal.test/x.ics");
+    expect(await api.importIcal("https://cal.test/x.ics")).toBeNull();
     await api.postDevRecord({ did: "d" });
     const calls = f.mock.calls.map(([u, i]) => [
       i.method,
@@ -60,16 +56,6 @@ describe("api", () => {
       JSON.parse(i.body),
     ]);
     expect(calls).toEqual([
-      [
-        "POST",
-        "/api/subscriptions",
-        { subscriberId: "s1", eventUri: "at://e" },
-      ],
-      [
-        "DELETE",
-        "/api/subscriptions",
-        { subscriberId: "s1", eventUri: "at://e" },
-      ],
       ["POST", "/api/import/ical", { url: "https://cal.test/x.ics" }],
       ["POST", "/api/dev/records", { did: "d" }],
     ]);
@@ -162,7 +148,9 @@ describe("api", () => {
         throw new TypeError("off");
       }),
     );
-    await expect(api.subscribe("s", "u")).rejects.toMatchObject({
+    await expect(
+      api.importIcal("https://cal.test/x.ics"),
+    ).rejects.toMatchObject({
       offline: true,
     });
   });

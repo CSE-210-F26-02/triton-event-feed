@@ -1,13 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { createFilterBar } from "../src/views/filterBar.js";
 import {
-  MAP_CONFIG,
+  assertMapConfig,
   buildMarkers,
   createMapView,
   createPinMap,
 } from "../src/views/mapView.js";
 import { createGeo } from "../src/geo.js";
-import { sampleEvent } from "./helpers.js";
+import { sampleEvent, testConfig } from "./helpers.js";
+
+/** Map settings from the shared test env (what frontend/.env provides in the app). */
+const MAP = (await testConfig()).map;
 
 describe("mapView.buildMarkers", () => {
   it("keeps only events with valid coordinates", () => {
@@ -31,13 +34,16 @@ describe("mapView.buildMarkers", () => {
     globalThis.L = L;
     const root = document.createElement("div");
     const view = createMapView(root, {
-      config: { tileUrl: "https://tiles.example/{z}/{x}/{y}.pbf" },
+      config: { ...MAP, tileUrl: "https://tiles.example/{z}/{x}/{y}.pbf" },
       load: async () => L,
     });
     await view.show([sampleEvent()]);
     expect(L.tileLayer).toHaveBeenCalledWith(
       "https://tiles.example/{z}/{x}/{y}.pbf",
-      expect.objectContaining({ maxZoom: MAP_CONFIG.maxZoom }),
+      expect.objectContaining({
+        maxZoom: MAP.maxZoom,
+        attribution: MAP.attribution,
+      }),
     );
     expect(L.marker).toHaveBeenCalledTimes(1);
     delete globalThis.L;
@@ -46,6 +52,7 @@ describe("mapView.buildMarkers", () => {
   it("shows an error when Leaflet fails to load", async () => {
     const root = document.createElement("div");
     await createMapView(root, {
+      config: MAP,
       load: async () => {
         throw new Error("x");
       },
@@ -62,7 +69,10 @@ describe("mapView.buildMarkers", () => {
           finishLoading = resolve;
         }),
     );
-    const view = createMapView(document.createElement("div"), { load });
+    const view = createMapView(document.createElement("div"), {
+      config: MAP,
+      load,
+    });
     const first = view.show([sampleEvent()]);
     const latest = view.show([
       sampleEvent({
@@ -81,11 +91,47 @@ describe("mapView.buildMarkers", () => {
   });
 });
 
+describe("mapView config (from frontend/.env)", () => {
+  it("accepts a complete config and returns it", () => {
+    expect(assertMapConfig(MAP)).toBe(MAP);
+  });
+
+  it("names every missing field", () => {
+    const { tileUrl: _tileUrl, zoom: _zoom, ...partial } = MAP;
+    expect(() => assertMapConfig(partial)).toThrow(
+      "Map config is missing: tileUrl, zoom",
+    );
+    expect(() => assertMapConfig(undefined)).toThrow(TypeError);
+  });
+
+  it("refuses to build maps without a config", () => {
+    const root = document.createElement("div");
+    expect(() => createMapView(root, {})).toThrow(TypeError);
+    expect(() => createPinMap(root, {})).toThrow(TypeError);
+  });
+
+  it("starts the main map at the configured center and zoom", async () => {
+    const L = fakeLeaflet();
+    const setView = vi.fn(function () {
+      return this;
+    });
+    L.map = vi.fn(() => ({ setView, invalidateSize() {}, fitBounds() {} }));
+    const root = document.createElement("div");
+    await createMapView(root, {
+      config: { ...MAP, center: [1, 2], zoom: 7 },
+      load: async () => L,
+    }).show([]);
+    expect(setView).toHaveBeenCalledWith([1, 2], 7);
+  });
+});
+
 describe("mapView.createPinMap", () => {
   it("centers a single marker on the event", async () => {
     const L = fakeLeaflet();
     const root = document.createElement("div");
-    await createPinMap(root, { load: async () => L }).show(sampleEvent());
+    await createPinMap(root, { config: MAP, load: async () => L }).show(
+      sampleEvent(),
+    );
     expect(root.querySelector(".map")).not.toBeNull();
     expect(L.marker).toHaveBeenCalledWith([32.8797, -117.2362], {
       title: "Taco Tuesday",
@@ -95,7 +141,7 @@ describe("mapView.createPinMap", () => {
   it("explains when the event has no coordinates", async () => {
     const load = vi.fn();
     const root = document.createElement("div");
-    await createPinMap(root, { load }).show(
+    await createPinMap(root, { config: MAP, load }).show(
       sampleEvent({ location: { name: "TBD" } }),
     );
     expect(load).not.toHaveBeenCalled();
@@ -105,6 +151,7 @@ describe("mapView.createPinMap", () => {
   it("shows an error when Leaflet fails, and does nothing once destroyed", async () => {
     const failing = document.createElement("div");
     await createPinMap(failing, {
+      config: MAP,
       load: async () => {
         throw new Error("offline");
       },
@@ -113,7 +160,7 @@ describe("mapView.createPinMap", () => {
 
     const L = fakeLeaflet();
     const root = document.createElement("div");
-    const pin = createPinMap(root, { load: async () => L });
+    const pin = createPinMap(root, { config: MAP, load: async () => L });
     const pending = pin.show(sampleEvent());
     pin.destroy();
     await pending;

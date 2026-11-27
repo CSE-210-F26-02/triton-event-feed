@@ -5,8 +5,17 @@
 import { closeDialog, h, openDialog } from "../dom.js";
 
 /**
- * @param {{login: (identifier: string, password: string) => Promise<any>, onLoggedIn?: () => void}} deps
- * @returns {{open(): void, element: HTMLDialogElement}}
+ * @typedef {object} LoginRequest
+ * @property {string} [reason] why login is needed, shown above the form
+ *   (e.g. "Log in to subscribe to this event.")
+ * @property {() => (void|Promise<void>)} [onLoggedIn] runs once after a successful login
+ *   from this dialog, after the global onLoggedIn; never runs if the dialog is cancelled
+ */
+
+/**
+ * @param {{login: (identifier: string, password: string) => Promise<any>,
+ *   onLoggedIn?: () => (void|Promise<void>)}} deps
+ * @returns {{open(request?: LoginRequest): void, element: HTMLDialogElement}}
  */
 export function createLoginView({ login, onLoggedIn }) {
   const dialog = h("dialog", {
@@ -14,7 +23,8 @@ export function createLoginView({ login, onLoggedIn }) {
     "aria-labelledby": "login-title",
   });
 
-  function open() {
+  /** @param {LoginRequest} [request] */
+  function open({ reason, onLoggedIn: afterThisLogin } = {}) {
     const status = h("p", { class: "form-status", role: "status" });
     const submit = h(
       "button",
@@ -76,16 +86,19 @@ export function createLoginView({ login, onLoggedIn }) {
           form.elements.identifier.value,
           form.elements.password.value,
         );
-        closeDialog(dialog);
-        onLoggedIn?.();
       } catch (err) {
         status.textContent = `Login failed: ${err.message}`;
+        return;
       } finally {
         submit.disabled = false;
       }
+      closeDialog(dialog);
+      await onLoggedIn?.();
+      await afterThisLogin?.();
     });
     dialog.replaceChildren(
       h("h2", { id: "login-title" }, "Log in with Bluesky"),
+      reason && h("p", { class: "hint", id: "login-reason" }, reason),
       form,
     );
     openDialog(dialog);

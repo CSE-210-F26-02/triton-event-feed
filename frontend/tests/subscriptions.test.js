@@ -1,146 +1,274 @@
 import { describe, expect, it, vi } from "vitest";
+import fullFixture from "../../fixtures/event/valid/full.json";
+import { SUBSCRIPTION_NSID } from "../src/lexicon/validateSubscription.js";
 import {
-  backoffMs,
+  SUBSCRIPTION_ERROR,
+  SubscriptionError,
   createSubscriptions,
-  getSubscriberId,
-  mergeNotifications,
+  indexSubscriptionRecords,
 } from "../src/subscriptions.js";
-import { memoryStorage } from "./helpers.js";
+import { lexiconEventView, sampleEvent } from "./helpers.js";
 
-const n = (id, message = `m${id}`) => ({
-  id,
-  subscriberId: "s",
-  eventUri: "at://e",
-  kind: "announcement",
-  message,
-  createdAt: "2026-11-11T00:00:00Z",
+const ME = "did:plc:me";
+/** Before the full fixture's event (Dec 4, 2026) starts. */
+const BEFORE = new Date("2026-12-01T00:00:00Z");
+/** After it ended. */
+const AFTER = new Date("2026-12-10T00:00:00Z");
+
+/** A valid, subscribable EventView built from the shared full fixture. */
+const eventA = lexiconEventView(fullFixture.record, {
+  uri: "at://did:plc:host/app.communitymap.event/3aaa",
+});
+const eventB = lexiconEventView(fullFixture.record, {
+  uri: "at://did:plc:host/app.communitymap.event/3bbb",
 });
 
-class FakeES {
-  static instances = [];
-  constructor(url) {
-    this.url = url;
-    this.closed = false;
-    FakeES.instances.push(this);
-  }
-  close() {
-    this.closed = true;
-  }
-}
+/** A listRecords entry for a subscription to `event`, with record key `rkey`. */
+const listed = (event, rkey) => ({
+  uri: `at://${ME}/${SUBSCRIPTION_NSID}/${rkey}`,
+  cid: event.cid,
+  value: {
+    $type: SUBSCRIPTION_NSID,
+    subject: { uri: event.uri, cid: event.cid },
+    createdAt: "2026-11-26T18:00:00.000Z",
+  },
+});
 
-function setup({ storage = memoryStorage(), notifications = [] } = {}) {
-  FakeES.instances = [];
-  const api = {
-    listSubscriptions: vi.fn(async () => ({ data: ["at://e"], stale: false })),
-    subscribe: vi.fn(async () => null),
-    unsubscribe: vi.fn(async () => null),
-    notifications: vi.fn(async () => ({ data: notifications, stale: false })),
-    notificationStreamUrl: (id) =>
-      `/api/notifications/stream?subscriberId=${id}`,
+/** In-memory stand-in for the atproto writer's subscription methods. */
+function fakeRepo(initial = []) {
+  const records = [...initial];
+  let nextKey = 0;
+  return {
+    did: ME,
+    records,
+    listSubscriptions: vi.fn(async () => [...records]),
+    createSubscription: vi.fn(async (record) => {
+      const rkey = `3new${nextKey++}`;
+      records.push({
+        uri: `at://${ME}/${SUBSCRIPTION_NSID}/${rkey}`,
+        cid: "c",
+        value: record,
+      });
+      return { uri: `at://${ME}/${SUBSCRIPTION_NSID}/${rkey}`, cid: "c" };
+    }),
+    deleteSubscription: vi.fn(async (rkey) => {
+      const i = records.findIndex((r) => r.uri.endsWith(`/${rkey}`));
+      if (i >= 0) records.splice(i, 1);
+    }),
   };
-  const toast = vi.fn();
-  const NotificationImpl = Object.assign(vi.fn(), {
-    permission: "default",
-    requestPermission: vi.fn(async () => "granted"),
-  });
-  const subs = createSubscriptions({
-    api,
-    storage,
-    EventSourceImpl: FakeES,
-    NotificationImpl,
-    toast,
-    baseDelayMs: 10,
-  });
-  return { api, toast, subs, storage, NotificationImpl };
 }
 
-const flush = () => new Promise((r) => setTimeout(r, 0));
-
-describe("mergeNotifications", () => {
-  it("keeps only newer, deduped, sorted; advances lastId", () => {
-    expect(mergeNotifications(5, [n(7), n(4), n(6), n(7), n(5)])).toEqual({
-      fresh: [n(6), n(7)],
-      lastId: 7,
-    });
-    expect(mergeNotifications(5, [])).toEqual({ fresh: [], lastId: 5 });
-    expect(mergeNotifications(null, [n(2), n(1)]).lastId).toBe(2);
+/** Build a store around `repo` (null = logged out). */
+function setup({ repo = fakeRepo(), now = BEFORE } = {}) {
+  const onChange = vi.fn();
+  let current = repo;
+  const subs = createSubscriptions({
+    getRepo: () => current,
+    onChange,
+    now: () => now,
   });
+  return { subs, repo, onChange, logout: () => (current = null) };
+}
 
-  it("backoff doubles and caps", () => {
-    expect([0, 1, 2, 10].map((i) => backoffMs(i, 1000, 30000))).toEqual([
-      1000, 2000, 4000, 30000,
+describe("indexSubscriptionRecords", () => {
+  it("maps each event URI to its subscription record keys", () => {
+    const { byEvent, skipped } = indexSubscriptionRecords([
+      listed(eventA, "3k1"),
+      listed(eventB, "3k2"),
+      listed(eventA, "3k3"), // duplicate (e.g. two tabs)
     ]);
+    expect([...byEvent]).toEqual([
+      [eventA.uri, ["3k1", "3k3"]],
+      [eventB.uri, ["3k2"]],
+    ]);
+    expect(skipped).toBe(0);
   });
+
+  it("skips records that break the lexicon or have no record key", () => {
+    const notAnEvent = listed(eventA, "3k4");
+    notAnEvent.value.subject.uri = "at://did:plc:x/app.bsky.feed.post/1";
+    const { byEvent, skipped } = indexSubscriptionRecords([
+      notAnEvent,
+      { uri: "garbage", value: listed(eventA, "x").value },
+      { uri: `at://${ME}/${SUBSCRIPTION_NSID}/3k5`, value: { nope: true } },
+      null,
+      listed(eventB, "3k6"),
+    ]);
+    expect([...byEvent.keys()]).toEqual([eventB.uri]);
+    expect(skipped).toBe(4);
+  });
+
+  it.each([null, undefined, "records", {}])(
+    "returns nothing for a non-array (%j)",
+    (value) => {
+      expect(indexSubscriptionRecords(value)).toEqual({
+        byEvent: new Map(),
+        skipped: 0,
+      });
+    },
+  );
 });
 
-describe("subscriptions", () => {
-  it("persists an anonymous subscriberId", () => {
-    const s = memoryStorage();
-    const id = getSubscriberId(s);
-    expect(id).toBeTruthy();
-    expect(getSubscriberId(s)).toBe(id);
-  });
-
-  it("subscribe/unsubscribe call the API; permission is requested only once", async () => {
-    const { api, subs, NotificationImpl } = setup();
-    await subs.toggle("at://a");
-    expect(api.subscribe).toHaveBeenCalledWith(subs.subscriberId, "at://a");
-    expect(subs.has("at://a")).toBe(true);
-    await subs.toggle("at://a");
-    expect(api.unsubscribe).toHaveBeenCalledWith(subs.subscriberId, "at://a");
-    expect(subs.has("at://a")).toBe(false);
-    await subs.toggle("at://b");
-    expect(NotificationImpl.requestPermission).toHaveBeenCalledTimes(1);
-  });
-
-  it("opens the stream only while subscribed and toasts messages", async () => {
-    const { subs, toast } = setup();
+describe("createSubscriptions", () => {
+  it("load() reads the user's records from their PDS", async () => {
+    const { subs, onChange } = setup({
+      repo: fakeRepo([listed(eventA, "3k1")]),
+    });
     await subs.load();
-    expect(FakeES.instances).toHaveLength(1);
-    expect(FakeES.instances[0].url).toContain(
-      `subscriberId=${subs.subscriberId}`,
+    expect(subs.has(eventA.uri)).toBe(true);
+    expect(subs.ownerDid).toBe(ME);
+    expect(onChange).toHaveBeenLastCalledWith(new Set([eventA.uri]));
+  });
+
+  it("load() while logged out leaves nothing subscribed", async () => {
+    const { subs, onChange } = setup({ repo: null });
+    await subs.load();
+    expect(subs.subscribed).toEqual(new Set());
+    expect(onChange).toHaveBeenCalledWith(new Set());
+  });
+
+  it("load() failures propagate and keep the previous state", async () => {
+    const repo = fakeRepo([listed(eventA, "3k1")]);
+    const { subs } = setup({ repo });
+    await subs.load();
+    repo.listSubscriptions.mockRejectedValueOnce(new Error("offline"));
+    await expect(subs.load()).rejects.toThrow("offline");
+    expect(subs.has(eventA.uri)).toBe(true);
+  });
+
+  it("subscribe() publishes a valid strongRef record and tracks it", async () => {
+    const { subs, repo } = setup();
+    await expect(subs.subscribe(eventA)).resolves.toBe(true);
+    expect(repo.createSubscription).toHaveBeenCalledWith({
+      $type: SUBSCRIPTION_NSID,
+      subject: { uri: eventA.uri, cid: eventA.cid },
+      createdAt: BEFORE.toISOString(),
+    });
+    expect(subs.has(eventA.uri)).toBe(true);
+  });
+
+  it("subscribe() is a no-op when already subscribed or already in flight", async () => {
+    const { subs, repo } = setup();
+    await Promise.all([subs.subscribe(eventA), subs.subscribe(eventA)]);
+    await subs.subscribe(eventA);
+    expect(repo.createSubscription).toHaveBeenCalledTimes(1);
+  });
+
+  it("subscribe() re-lists when the PDS returns no record URI", async () => {
+    const repo = fakeRepo();
+    repo.createSubscription.mockImplementationOnce(async (record) => {
+      repo.records.push({ ...listed(eventA, "3late"), value: record });
+      return {};
+    });
+    const { subs } = setup({ repo });
+    await subs.subscribe(eventA);
+    expect(repo.listSubscriptions).toHaveBeenCalled();
+    await subs.unsubscribe(eventA.uri);
+    expect(repo.deleteSubscription).toHaveBeenCalledWith("3late");
+  });
+
+  it("refuses to subscribe when logged out", async () => {
+    const { subs, repo } = setup({ repo: null });
+    await expect(subs.subscribe(eventA)).rejects.toMatchObject({
+      code: SUBSCRIPTION_ERROR.loginRequired,
+    });
+    expect(repo).toBeNull();
+  });
+
+  it("refuses to subscribe to an ended event", async () => {
+    const { subs, repo } = setup({ now: AFTER });
+    const error = await subs.subscribe(eventA).catch((e) => e);
+    expect(error).toBeInstanceOf(SubscriptionError);
+    expect(error.code).toBe(SUBSCRIPTION_ERROR.eventEnded);
+    expect(repo.createSubscription).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["an invalid CID", sampleEvent({ endsAt: "2099-01-01T00:00:00Z" })],
+    ["no CID", { ...eventA, cid: undefined }],
+    [
+      "a non-event URI",
+      { ...eventA, uri: "at://did:plc:x/app.bsky.feed.post/1" },
+    ],
+    ["no URI", { ...eventA, uri: undefined }],
+    ["not an object", null],
+  ])("refuses to publish an invalid record (%s)", async (_label, event) => {
+    const { subs, repo } = setup();
+    await expect(subs.subscribe(event)).rejects.toMatchObject({
+      code: SUBSCRIPTION_ERROR.invalidEvent,
+    });
+    expect(repo.createSubscription).not.toHaveBeenCalled();
+  });
+
+  it("unsubscribe() deletes every record for the event (deleteRecord)", async () => {
+    const repo = fakeRepo([listed(eventA, "3k1"), listed(eventA, "3k2")]);
+    const { subs, onChange } = setup({ repo });
+    await subs.load();
+    await expect(subs.unsubscribe(eventA.uri)).resolves.toBe(false);
+    expect(repo.deleteSubscription.mock.calls).toEqual([["3k1"], ["3k2"]]);
+    expect(subs.has(eventA.uri)).toBe(false);
+    expect(onChange).toHaveBeenLastCalledWith(new Set());
+  });
+
+  it("unsubscribe() works for ended events", async () => {
+    const { subs, repo } = setup({
+      repo: fakeRepo([listed(eventA, "3k1")]),
+      now: AFTER,
+    });
+    await subs.load();
+    await subs.unsubscribe(eventA.uri);
+    expect(repo.deleteSubscription).toHaveBeenCalledWith("3k1");
+  });
+
+  it("a failed delete keeps the records that were not deleted", async () => {
+    const repo = fakeRepo([listed(eventA, "3k1"), listed(eventA, "3k2")]);
+    repo.deleteSubscription
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("offline"));
+    const { subs } = setup({ repo });
+    await subs.load();
+    await expect(subs.unsubscribe(eventA.uri)).rejects.toThrow("offline");
+    expect(subs.has(eventA.uri)).toBe(true);
+    repo.deleteSubscription.mockResolvedValue(undefined);
+    await subs.unsubscribe(eventA.uri);
+    expect(repo.deleteSubscription).toHaveBeenLastCalledWith("3k2");
+  });
+
+  it("toggle() subscribes, then unsubscribes", async () => {
+    const { subs, repo } = setup();
+    await expect(subs.toggle(eventA)).resolves.toBe(true);
+    await expect(subs.toggle(eventA)).resolves.toBe(false);
+    expect(repo.createSubscription).toHaveBeenCalledTimes(1);
+    expect(repo.deleteSubscription).toHaveBeenCalledTimes(1);
+  });
+
+  it("subscriptions persist across stores (the PDS is the source of truth)", async () => {
+    const repo = fakeRepo();
+    await setup({ repo }).subs.subscribe(eventA);
+    const { subs: afterReload } = setup({ repo });
+    await afterReload.load();
+    expect(afterReload.has(eventA.uri)).toBe(true);
+  });
+
+  it("clear() forgets everything and wins over an in-flight load", async () => {
+    const repo = fakeRepo([listed(eventA, "3k1")]);
+    let release;
+    repo.listSubscriptions.mockImplementationOnce(
+      () => new Promise((resolve) => (release = resolve)),
     );
-    FakeES.instances[0].onmessage({
-      data: JSON.stringify(n(1, "Room changed")),
-    });
-    expect(toast).toHaveBeenCalledWith("Room changed");
-    await subs.toggle("at://e");
-    expect(FakeES.instances[0].closed).toBe(true);
+    const { subs } = setup({ repo });
+    const loading = subs.load();
+    subs.clear();
+    release([listed(eventA, "3k1")]);
+    await loading;
+    expect(subs.subscribed).toEqual(new Set());
+    expect(subs.ownerDid).toBeNull();
   });
 
-  it("first connect records a baseline silently", async () => {
-    const { subs, toast, api, storage } = setup({
-      notifications: [n(3), n(4)],
+  it("refuses to unsubscribe when logged out", async () => {
+    const { subs } = setup({ repo: null });
+    await expect(subs.unsubscribe(eventA.uri)).rejects.toMatchObject({
+      code: SUBSCRIPTION_ERROR.loginRequired,
     });
-    await subs.load();
-    FakeES.instances[0].onopen();
-    await flush();
-    expect(api.notifications).toHaveBeenCalledWith(subs.subscriberId, null);
-    expect(toast).not.toHaveBeenCalled();
-    expect(storage.getItem("cm:last-notification-id")).toBe("4");
-  });
-
-  it("on reconnect, catches up via since=<lastId> without duplicating stream messages", async () => {
-    vi.useFakeTimers();
-    const { subs, toast, api } = setup();
-    await subs.load();
-    const es1 = FakeES.instances[0];
-    es1.onmessage({ data: JSON.stringify(n(10)) });
-    es1.onerror();
-    expect(es1.closed).toBe(true);
-    await vi.advanceTimersByTimeAsync(10);
-    const es2 = FakeES.instances[1];
-    expect(es2).toBeDefined();
-    api.notifications.mockResolvedValueOnce({
-      data: [n(10), n(11), n(12)],
-      stale: false,
-    });
-    es2.onopen();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(api.notifications).toHaveBeenLastCalledWith(subs.subscriberId, 10);
-    expect(toast.mock.calls.map((c) => c[0])).toEqual(["m10", "m11", "m12"]);
-    es2.onmessage({ data: JSON.stringify(n(12)) });
-    expect(toast).toHaveBeenCalledTimes(3);
-    vi.useRealTimers();
   });
 });

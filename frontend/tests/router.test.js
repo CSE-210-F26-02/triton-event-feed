@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   EVENT_ROUTE_PREFIX,
+  SUBSCRIPTIONS_ROUTE,
   createRouter,
   eventHash,
   parseHash,
@@ -108,5 +109,25 @@ describe("router.createRouter", () => {
     win.location.hash = "#main";
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(router.current().view).toBe("event");
+  });
+
+  it("routes #/subscriptions to My subscriptions (#19)", () => {
+    const onChange = vi.fn();
+    const win = fakeWindow(SUBSCRIPTIONS_ROUTE);
+    const router = createRouter({ onChange, win });
+    router.start();
+    expect(onChange).toHaveBeenLastCalledWith({ view: "subscriptions" });
+    router.home();
+    router.openSubscriptions();
+    expect(win.location.hash).toBe(SUBSCRIPTIONS_ROUTE);
+    expect(router.current()).toEqual({ view: "subscriptions" });
+    const calls = onChange.mock.calls.length;
+    router.openSubscriptions(); // already there: re-syncs instead of a no-op
+    expect(onChange).toHaveBeenCalledTimes(calls + 1);
+  });
+
+  it("parses only the exact subscriptions hash", () => {
+    expect(parseHash(SUBSCRIPTIONS_ROUTE)).toEqual({ view: "subscriptions" });
+    expect(parseHash("#/subscriptions/extra")).toBeNull();
   });
 });

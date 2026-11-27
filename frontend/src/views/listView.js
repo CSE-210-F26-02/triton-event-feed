@@ -4,8 +4,9 @@
  * @module views/listView
  */
 import { h } from "../dom.js";
-import { groupByDay, isUpdated } from "../filters.js";
+import { groupByDay, isEnded, isUpdated } from "../filters.js";
 import { describeGroup } from "../lexicon/eventView.js";
+import { renderSubscribeButton } from "./subscribeButton.js";
 import {
   formatDistance,
   formatTimeWindow,
@@ -15,9 +16,15 @@ import {
 
 /**
  * @typedef {{onOpen?: (uri: string) => void, onTagClick?: (tag: string) => void,
- *   onToggleSubscribe?: (uri: string) => void, activeTags?: string[],
- *   subscribed?: Set<string>, locale?: string, timeZone?: string}} CardOpts
+ *   onToggleSubscribe?: (ev: object) => void, activeTags?: string[],
+ *   subscribed?: Set<string>, locale?: string, timeZone?: string, now?: Date,
+ *   idPrefix?: string}} CardOpts
+ * `idPrefix` keeps element ids unique when the same event is shown in two places at once
+ * (e.g. the feed and My subscriptions); it defaults to CARD_ID_PREFIX.
  */
+
+/** Default prefix of card title ids. */
+export const CARD_ID_PREFIX = "ev";
 
 /**
  * Group line on a card. Lexicon strongRef groups keep their record URI on the element
@@ -48,8 +55,9 @@ export function renderCard(ev, opts = {}) {
     onToggleSubscribe,
     activeTags = [],
     subscribed = new Set(),
+    idPrefix = CARD_ID_PREFIX,
   } = opts;
-  const titleId = `ev-${hashId(ev.uri)}`;
+  const titleId = `${idPrefix}-${hashId(ev.uri)}`;
   const status = statusLabel(ev.status);
   const href = osmUrl(ev);
   const isSub = subscribed.has(ev.uri);
@@ -127,17 +135,13 @@ export function renderCard(ev, opts = {}) {
     h(
       "div",
       { class: "card__actions" },
-      h(
-        "button",
-        {
-          type: "button",
-          class: `btn ${isSub ? "btn--on" : ""}`,
-          "aria-pressed": String(isSub),
-          dataset: { focusKey: `sub:${ev.uri}` },
-          onclick: () => onToggleSubscribe?.(ev.uri),
-        },
-        isSub ? "Subscribed" : "Subscribe",
-      ),
+      renderSubscribeButton(ev, {
+        subscribed: isSub,
+        ended: isEnded(ev, opts.now),
+        variant: "plain",
+        dataset: { focusKey: `sub:${ev.uri}` },
+        onToggle: onToggleSubscribe,
+      }),
     ),
   );
 }

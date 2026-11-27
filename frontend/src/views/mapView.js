@@ -1,23 +1,44 @@
 /**
  * Map workspace displayed alongside the event list. Leaflet loads once on first render.
- * The tile provider is configuration so it can be swapped (e.g. Overture/Protomaps).
+ * Everything deployment-specific (Leaflet URLs, tile provider, default view) comes from
+ * the app config (src/config.js, read from frontend/.env), so it can be swapped
+ * (e.g. Overture/Protomaps) without code changes.
  * @module views/mapView
  */
 import { h } from "../dom.js";
 import { coordsOf } from "../filters.js";
 import { formatTimeWindow } from "../format.js";
 
-/** Default map configuration. Override any field via createMapView({config}). */
-export const MAP_CONFIG = Object.freeze({
-  leafletJs: "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-  leafletCss: "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
-  tileUrl: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-  attribution:
-    '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  maxZoom: 19,
-  center: [32.8801, -117.234], // UCSD
-  zoom: 15,
-});
+/**
+ * @typedef {import('../config.js').MapConfig} MapConfig
+ */
+
+/** Fields every map config must have (see MapConfig). */
+const MAP_CONFIG_FIELDS = Object.freeze([
+  "leafletJs",
+  "leafletCss",
+  "tileUrl",
+  "attribution",
+  "maxZoom",
+  "center",
+  "zoom",
+]);
+
+/**
+ * Check a map config has every field, so a missing setting fails loudly at startup
+ * instead of as a blank map.
+ * @param {unknown} config
+ * @returns {MapConfig}
+ * @throws {TypeError} naming the missing fields
+ */
+export function assertMapConfig(config) {
+  const missing = MAP_CONFIG_FIELDS.filter((field) => config?.[field] == null);
+  if (missing.length)
+    throw new TypeError(
+      `Map config is missing: ${missing.join(", ")} (see src/config.js)`,
+    );
+  return /** @type {MapConfig} */ (config);
+}
 
 /**
  * Pure: events → marker descriptors (only events with valid coordinates).
@@ -46,10 +67,10 @@ let leafletPromise = null;
 
 /**
  * Inject Leaflet's CSS + script once and resolve with window.L.
- * @param {typeof MAP_CONFIG} config
+ * @param {MapConfig} config
  * @returns {Promise<any>}
  */
-export function loadLeaflet(config = MAP_CONFIG) {
+export function loadLeaflet(config) {
   if (globalThis.L) return Promise.resolve(globalThis.L);
   leafletPromise ??= new Promise((resolve, reject) => {
     document.head.append(
@@ -70,15 +91,13 @@ export function loadLeaflet(config = MAP_CONFIG) {
 /**
  * Create the map view.
  * @param {HTMLElement} root
- * @param {{onOpen?: (uri: string) => void, config?: Partial<typeof MAP_CONFIG>,
- *   load?: (c: typeof MAP_CONFIG) => Promise<any>}} [opts]
+ * @param {{config: MapConfig, onOpen?: (uri: string) => void,
+ *   load?: (c: MapConfig) => Promise<any>}} opts
  * @returns {{show(events: object[]): Promise<void>}}
+ * @throws {TypeError} when the map config is incomplete
  */
-export function createMapView(
-  root,
-  { onOpen, config = {}, load = loadLeaflet } = {},
-) {
-  const cfg = { ...MAP_CONFIG, ...config };
+export function createMapView(root, { onOpen, config, load = loadLeaflet }) {
+  const cfg = assertMapConfig(config);
   let map = null;
   let layer = null;
   let leaflet = null;
@@ -174,11 +193,12 @@ export function createMapView(
  * Small single-pin map used inside the event detail pane. Shares the Leaflet loader
  * (and therefore the browser's tile cache) with the main map.
  * @param {HTMLElement} root container; must be in the document before show() resolves
- * @param {{config?: Partial<typeof MAP_CONFIG>, load?: (c: typeof MAP_CONFIG) => Promise<any>}} [opts]
+ * @param {{config: MapConfig, load?: (c: MapConfig) => Promise<any>}} opts
  * @returns {{show(event: object): Promise<void>, destroy(): void}}
+ * @throws {TypeError} when the map config is incomplete
  */
-export function createPinMap(root, { config = {}, load = loadLeaflet } = {}) {
-  const mapConfig = { ...MAP_CONFIG, ...config };
+export function createPinMap(root, { config, load = loadLeaflet }) {
+  const mapConfig = assertMapConfig(config);
   let pinMap = null;
   let destroyed = false;
 

@@ -1,0 +1,9 @@
+{
+  "description": "subject has a uri but no cid, so it is not a strongRef.",
+  "expectedErrorContains": "cid",
+  "record": {
+    "$type": "app.communitymap.subscription",
+    "subject": { "uri": "at://did:plc:7iza6de2dwap2sbkpav7c6c6/app.communitymap.event/3lbxq7k2mzs2a" },
+    "createdAt": "2026-11-26T18:00:00.000Z"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "lexicon": 1,
+  "id": "app.communitymap.subscription",
+  "defs": {
+    "main": {
+      "type": "record",
+      "key": "tid",
+      "description": "A user's subscription to an event, stored on the subscriber's own PDS. The indexer reads these to know who to notify when the event changes. Like every AT Protocol record, it is public.",
+      "record": {
+        "type": "object",
+        "required": ["subject", "createdAt"],
+        "properties": {
+          "subject": {
+            "type": "ref",
+            "ref": "com.atproto.repo.strongRef",
+            "description": "The app.communitymap.event record being subscribed to (its URI and the CID of the version the user saw)."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "datetime"
+          }
+        }
+      }
+    }
+  }
+}

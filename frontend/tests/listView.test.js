@@ -1,5 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createListView, renderCard } from "../src/views/listView.js";
+import {
+  SUBSCRIBED_LABEL,
+  SUBSCRIBE_LABEL,
+  SUBSCRIPTION_PRIVACY_NOTE,
+} from "../src/views/subscribeButton.js";
+
+/** Before sampleEvent() ends, so its Subscribe button is shown. */
+const BEFORE_SAMPLE_ENDS = new Date("2026-11-11T12:00:00Z");
+/** After sampleEvent() ended. */
+const AFTER_SAMPLE_ENDS = new Date("2026-11-12T00:00:00Z");
 import fullFixture from "../../fixtures/event/valid/full.json";
 import { lexiconEventView, sampleEvent } from "./helpers.js";
 
@@ -24,6 +34,7 @@ describe("renderCard", () => {
     const card = renderCard(sampleEvent(), {
       timeZone: "America/Los_Angeles",
       locale: "en-US",
+      now: BEFORE_SAMPLE_ENDS,
     });
     expect(card.querySelector("h3").textContent).toBe("Taco Tuesday");
     expect(card.querySelector("time").getAttribute("datetime")).toBe(
@@ -38,7 +49,9 @@ describe("renderCard", () => {
       [...card.querySelectorAll(".chip")].map((c) => c.textContent),
     ).toEqual(["#food", "#free"]);
     const sub = card.querySelector("[aria-pressed]:not(.chip)");
-    expect(sub.textContent).toBe("Subscribe");
+    expect(sub.textContent).toBe(SUBSCRIBE_LABEL);
+    expect(sub.dataset.action).toBe("subscribe");
+    expect(sub.title).toBe(SUBSCRIPTION_PRIVACY_NOTE);
   });
 
   it("falls back to address search when no coordinates", () => {
@@ -88,6 +101,7 @@ describe("renderCard", () => {
       onOpen,
       onToggleSubscribe,
       activeTags: ["food"],
+      now: BEFORE_SAMPLE_ENDS,
     });
     const chip = card.querySelector(".chip");
     expect(chip.getAttribute("aria-pressed")).toBe("true");
@@ -96,7 +110,31 @@ describe("renderCard", () => {
     card.querySelector(".card__actions button").click();
     expect(onTagClick).toHaveBeenCalledWith("food");
     expect(onOpen).toHaveBeenCalledWith(ev.uri);
-    expect(onToggleSubscribe).toHaveBeenCalledWith(ev.uri);
+    // The whole EventView is passed, so the subscription record can use its cid.
+    expect(onToggleSubscribe).toHaveBeenCalledWith(ev);
+  });
+
+  it("hides Subscribe on ended events, but keeps Subscribed ✓ so you can unsubscribe", () => {
+    const ev = sampleEvent();
+    expect(
+      renderCard(ev, { now: AFTER_SAMPLE_ENDS }).querySelector(
+        "[data-action=subscribe]",
+      ),
+    ).toBeNull();
+    const subscribed = renderCard(ev, {
+      now: AFTER_SAMPLE_ENDS,
+      subscribed: new Set([ev.uri]),
+    }).querySelector("[data-action=subscribe]");
+    expect(subscribed.textContent).toBe(SUBSCRIBED_LABEL);
+  });
+
+  it("prefixes title ids so the same event can appear twice on a page", () => {
+    const ev = sampleEvent();
+    const feedId = renderCard(ev).querySelector("h3").id;
+    const otherId = renderCard(ev, { idPrefix: "sub" }).querySelector("h3").id;
+    expect(feedId).toMatch(/^ev-/);
+    expect(otherId).toMatch(/^sub-/);
+    expect(otherId).not.toBe(feedId);
   });
 });
 
@@ -181,6 +219,6 @@ describe("createListView", () => {
     v.render({ events: [e], now });
     root.querySelector(".card__actions button").focus();
     v.render({ events: [e], subscribed: new Set([e.uri]), now });
-    expect(document.activeElement.textContent).toBe("Subscribed");
+    expect(document.activeElement.textContent).toBe(SUBSCRIBED_LABEL);
   });
 });

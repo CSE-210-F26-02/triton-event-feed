@@ -12,8 +12,6 @@
       content="What's happening on campus right now: events from UCSD students and orgs."
     />
     <meta name="theme-color" content="#ffffff" />
-    <!-- API origin/prefix; empty = same origin ("/api/..."). -->
-    <meta name="cm-api-base" content="" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="./styles.css" />
@@ -66,6 +64,13 @@
           id="panel-detail"
           class="events-detail"
           aria-label="Event details"
+          hidden
+        ></section>
+        <!-- My subscriptions (#19): also replaces the map pane while open. -->
+        <section
+          id="panel-subscriptions"
+          class="events-detail"
+          aria-label="My subscriptions"
           hidden
         ></section>
       </div>

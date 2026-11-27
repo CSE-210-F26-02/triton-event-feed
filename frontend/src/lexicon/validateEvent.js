@@ -15,33 +15,9 @@
  * create-event form rule (issue #6); otherwise every event that has already
  * happened would become invalid.
  */
-import { Lexicons } from "@atproto/lexicon";
-import eventLexicon from "../../../lexicons/app/communitymap/event.json";
+import { eventLexicon, lexiconIssues } from "./registry.js";
 
 export const EVENT_NSID = "app.communitymap.event";
-
-/**
- * The standard AT Protocol strongRef lexicon (a record's uri + cid).
- * Our event's `group` field points to it, so the validator needs to know it.
- * Copied from the official definition in the atproto repo.
- */
-const strongRefLexicon = {
-  lexicon: 1,
-  id: "com.atproto.repo.strongRef",
-  description: "A URI with a content-hash fingerprint.",
-  defs: {
-    main: {
-      type: "object",
-      required: ["uri", "cid"],
-      properties: {
-        uri: { type: "string", format: "at-uri" },
-        cid: { type: "string", format: "cid" },
-      },
-    },
-  },
-};
-
-const lexicons = new Lexicons([eventLexicon, strongRefLexicon]);
 
 /**
  * @typedef {object} Location
@@ -71,9 +47,7 @@ const lexicons = new Lexicons([eventLexicon, strongRefLexicon]);
  */
 
 /**
- * @typedef {object} ValidationIssue
- * @property {string} path Where the problem is, e.g. "location.lat" ("" if unknown).
- * @property {string} message Human-readable description of the problem.
+ * @typedef {import('./registry.js').ValidationIssue} ValidationIssue
  */
 
 /**
@@ -100,22 +74,6 @@ export const EVENT_LIMITS = Object.freeze({
 // A plain decimal number such as "32.8801" or "-117.2375". Stricter than
 // Number(), which would also accept "", "0x20" or "1e2".
 const DECIMAL_RE = /^-?\d+(\.\d+)?$/;
-
-/**
- * Turns a @atproto/lexicon error message into { path, message }.
- * Its messages look like 'Record/location must have the property "lat"'.
- *
- * @param {string} message
- * @returns {ValidationIssue}
- */
-function toIssue(message) {
-  const match = /^Record((?:\/[^\s/]+)*)(?:\s|$)/.exec(message);
-  const parts = match ? match[1].split("/").filter(Boolean) : [];
-  // For a missing field, point at the field itself, e.g. "location.lat".
-  const missing = /must have the property "([^"]+)"/.exec(message);
-  if (missing) parts.push(missing[1]);
-  return { path: parts.join("."), message };
-}
 
 /**
  * Checks that a lat/lng string is a decimal number within [min, max].
@@ -154,12 +112,8 @@ export function validateEvent(record) {
   /** @type {ValidationIssue[]} */
   const errors = [];
 
-  // Stage 1: lexicon rules. assertValidRecord throws on the first problem.
-  try {
-    lexicons.assertValidRecord(EVENT_NSID, record);
-  } catch (err) {
-    errors.push(toIssue(err instanceof Error ? err.message : String(err)));
-  }
+  // Stage 1: lexicon rules (stops at the first problem).
+  errors.push(...lexiconIssues(EVENT_NSID, record));
 
   // Stage 2: rules the lexicon can't express. These check their own inputs,
   // so they're safe to run even when stage 1 found a problem.

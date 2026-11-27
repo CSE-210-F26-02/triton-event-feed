@@ -1,3 +1,6 @@
 node_modules/
 dist/
+# Local configuration (copy .env.example to .env). Never commit these.
 .env
+.env.*
+!.env.example

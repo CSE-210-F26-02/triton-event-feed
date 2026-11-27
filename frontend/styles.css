@@ -633,6 +633,24 @@ textarea {
 .detail--error {
   justify-items: start;
 }
+/* Subscriptions (#19): privacy help text and the My subscriptions page. */
+.detail__privacy {
+  font-size: 0.875rem;
+}
+.subscriptions__unavailable-list {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.subscriptions__unavailable {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
 
 @media (max-width: 47.99rem) {
   .events-layout {
@@ -640,7 +658,8 @@ textarea {
     height: auto;
   }
   /* On phones the detail is a full-width page; "Back to map" returns to the list. */
-  .events-layout[data-view="detail"] .events-sidebar {
+  .events-layout[data-view="detail"] .events-sidebar,
+  .events-layout[data-view="subscriptions"] .events-sidebar {
     display: none;
   }
   .events-detail {

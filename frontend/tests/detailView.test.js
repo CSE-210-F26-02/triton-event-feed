@@ -11,6 +11,11 @@ import {
   renderDetail,
   renderNotFound,
 } from "../src/views/detailView.js";
+import {
+  PRIVACY_NOTE_ID,
+  SUBSCRIBED_LABEL,
+  SUBSCRIPTION_PRIVACY_NOTE,
+} from "../src/views/subscribeButton.js";
 import { lexiconEventView, sampleEvent } from "./helpers.js";
 
 const BEFORE_EVENT = new Date("2026-11-11T12:00:00Z");
@@ -149,10 +154,11 @@ describe("detailView.renderActions", () => {
       onToggleSubscribe,
       subscribed: true,
     });
-    expect(subscribe.textContent).toBe("Subscribed");
+    expect(subscribe.textContent).toBe(SUBSCRIBED_LABEL);
     expect(subscribe.getAttribute("aria-pressed")).toBe("true");
     subscribe.click();
-    expect(onToggleSubscribe).toHaveBeenCalledWith(sampleEvent().uri);
+    // The whole EventView is handed over, so the subscription record gets its cid.
+    expect(onToggleSubscribe).toHaveBeenCalledWith(sampleEvent());
   });
 
   it("shows Edit / Delete only to the host", () => {
@@ -168,6 +174,47 @@ describe("detailView.renderActions", () => {
     buttons.find((b) => b.dataset.action === "delete").click();
     expect(onEdit).toHaveBeenCalledWith(sampleEvent());
     expect(onDelete).toHaveBeenCalledWith(sampleEvent());
+  });
+});
+
+describe("detailView subscribe slot (#19)", () => {
+  it("links the Subscribe button to visible privacy help text", () => {
+    const article = renderDetail(sampleEvent(), {
+      ...UTC,
+      onToggleSubscribe: () => {},
+    });
+    const button = article.querySelector("[data-action=subscribe]");
+    const note = article.querySelector(`#${PRIVACY_NOTE_ID}`);
+    expect(note.textContent).toBe(SUBSCRIPTION_PRIVACY_NOTE);
+    expect(button.getAttribute("aria-describedby")).toBe(PRIVACY_NOTE_ID);
+    expect(button.title).toBe(SUBSCRIPTION_PRIVACY_NOTE);
+  });
+
+  it("shows no Subscribe button and no privacy note on an ended event", () => {
+    const article = renderDetail(sampleEvent(), {
+      ...UTC,
+      now: AFTER_EVENT,
+      onToggleSubscribe: () => {},
+    });
+    expect(article.querySelector("[data-action=subscribe]")).toBeNull();
+    expect(article.querySelector(`#${PRIVACY_NOTE_ID}`)).toBeNull();
+  });
+
+  it("keeps Subscribed ✓ on an ended event the user follows, to allow unsubscribing", () => {
+    const onToggleSubscribe = vi.fn();
+    const [button] = renderActions(sampleEvent(), {
+      ended: true,
+      subscribed: true,
+      onToggleSubscribe,
+    });
+    expect(button.textContent).toBe(SUBSCRIBED_LABEL);
+    button.click();
+    expect(onToggleSubscribe).toHaveBeenCalledWith(sampleEvent());
+  });
+
+  it("shows no privacy note when subscriptions are unavailable", () => {
+    const article = renderDetail(sampleEvent(), UTC);
+    expect(article.querySelector(`#${PRIVACY_NOTE_ID}`)).toBeNull();
   });
 });
 
@@ -317,7 +364,7 @@ describe("detailView.createDetailView", () => {
     subscribed = true;
     view.refreshActions();
     expect(root.querySelector("[data-action=subscribe]").textContent).toBe(
-      "Subscribed",
+      SUBSCRIBED_LABEL,
     );
     expect(root.querySelector("#detail-title")).toBe(title);
     expect(pinMaps).toHaveLength(pinMapCount);
@@ -645,7 +692,7 @@ describe("detailView.createDetailView with lexicon records", () => {
     subscribed = true;
     view.refreshActions();
     expect(root.querySelector("[data-action=subscribe]").textContent).toBe(
-      "Subscribed",
+      SUBSCRIBED_LABEL,
     );
   });
 });

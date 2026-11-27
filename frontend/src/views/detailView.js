@@ -1,7 +1,7 @@
 /**
  * Event detail pane: replaces the big map while an event is open (#14). Shows everything
  * about one event (when, where, what, who) plus a small pin map and the action slots for
- * Subscribe (#20), host Edit/Delete (#9), Get directions (#22) and Add to calendar (#23).
+ * Subscribe (#19), host Edit/Delete (#9), Get directions (#22) and Add to calendar (#23).
  *
  * Every event is read through the app.communitymap.event lexicon (lexicon/eventView.js):
  * the view renders a sanitized "display event", and records that break the lexicon are
@@ -24,6 +24,12 @@ import {
   toDisplayEvent,
 } from "../lexicon/eventView.js";
 import { createPinMap } from "./mapView.js";
+import {
+  PRIVACY_NOTE_ID,
+  SUBSCRIBE_LABEL,
+  renderPrivacyNote,
+  renderSubscribeButton,
+} from "./subscribeButton.js";
 
 /** Banner shown when an event's record does not match the lexicon. */
 export const INVALID_RECORD_NOTICE =
@@ -49,7 +55,7 @@ const warnInvalidRecord = (uri, issues) =>
 
 /**
  * @typedef {{canEdit?: boolean, subscribed?: boolean, ended?: boolean,
- *   onToggleSubscribe?: (uri: string) => void, onEdit?: (ev: object) => void,
+ *   onToggleSubscribe?: (ev: object) => void, onEdit?: (ev: object) => void,
  *   onDelete?: (ev: object) => void}} ActionOpts
  */
 
@@ -245,9 +251,9 @@ const renderTags = (tags) =>
     : null;
 
 /**
- * Subscribe slot (#20). Uses the existing subscriptions client when a handler is given;
- * otherwise renders a disabled placeholder. Hidden for ended events unless already subscribed.
- * @param {object} ev
+ * Subscribe slot (#19): the shared toggle (views/subscribeButton.js), or a disabled
+ * placeholder when no handler is wired. Hidden for ended events unless already subscribed.
+ * @param {object} ev EventView (handed to the handler, so the subscription gets its cid)
  * @param {ActionOpts} opts
  * @returns {HTMLElement|null}
  */
@@ -260,21 +266,16 @@ function renderSubscribe(ev, opts) {
         type: "button",
         class: "btn",
         disabled: true,
-        title: "Coming soon (#20)",
+        title: "Subscriptions are unavailable",
       },
-      "Subscribe",
+      SUBSCRIBE_LABEL,
     );
-  return h(
-    "button",
-    {
-      type: "button",
-      class: `btn ${opts.subscribed ? "btn--on" : "btn--primary"}`,
-      "aria-pressed": String(Boolean(opts.subscribed)),
-      dataset: { action: "subscribe" },
-      onclick: () => opts.onToggleSubscribe(ev.uri),
-    },
-    opts.subscribed ? "Subscribed" : "Subscribe to updates",
-  );
+  return renderSubscribeButton(ev, {
+    subscribed: opts.subscribed,
+    ended: opts.ended,
+    onToggle: opts.onToggleSubscribe,
+    describedBy: PRIVACY_NOTE_ID,
+  });
 }
 
 /**
@@ -416,6 +417,7 @@ export function renderDetail(ev, opts = {}) {
       { class: "detail__actions" },
       renderActions(ev, { ...opts, ended }),
     ),
+    opts.onToggleSubscribe && !ended && renderPrivacyNote(),
     h("div", { class: "detail__map", "aria-label": "Event location map" }),
     view.description && h("p", { class: "detail__desc" }, view.description),
     source &&
@@ -489,9 +491,10 @@ const renderLoadError = (opts) =>
 /**
  * @typedef {{api: {getEvent(uri: string): Promise<{data: object, stale: boolean}>},
  *   findEvent?: (uri: string) => object|null, canEdit?: (ev: object) => boolean,
- *   isSubscribed?: (uri: string) => boolean, onToggleSubscribe?: (uri: string) => void,
+ *   isSubscribed?: (uri: string) => boolean, onToggleSubscribe?: (ev: object) => void,
  *   onEdit?: (ev: object) => void, onDelete?: (ev: object) => void, onClose?: () => void,
- *   onCopyLink?: (uri: string) => void, pinMapFactory?: typeof createPinMap,
+ *   onCopyLink?: (uri: string) => void, mapConfig?: import('../config.js').MapConfig,
+ *   pinMapFactory?: (root: HTMLElement) => ReturnType<typeof createPinMap>,
  *   now?: () => Date, onInvalidRecord?: (uri: string,
  *   issues: import('../lexicon/eventView.js').ValidationIssue[]) => void}} DetailDeps
  */
@@ -528,7 +531,8 @@ export function createDetailView(root, deps) {
   const {
     api,
     findEvent = () => null,
-    pinMapFactory = createPinMap,
+    pinMapFactory = (container) =>
+      createPinMap(container, { config: deps.mapConfig }),
     now = () => new Date(),
     onInvalidRecord = warnInvalidRecord,
   } = deps;

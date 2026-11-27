@@ -7,6 +7,7 @@ import {
   lexiconEventView,
   memoryStorage,
   sampleEvent,
+  testConfig,
 } from "./helpers.js";
 import { dayKey } from "../src/filters.js";
 import { eventHash } from "../src/router.js";
@@ -83,7 +84,7 @@ describe("app (smoke)", () => {
       jsonResponse(routes(url) ?? { error: "nf" }, routes(url) ? 200 : 404),
     );
     vi.stubGlobal("fetch", f);
-    await start();
+    await start({ config: await testConfig() });
     await flush();
     await flush();
     expect(document.querySelectorAll("#list article")).toHaveLength(1);
@@ -200,12 +201,12 @@ describe("app (smoke)", () => {
       fetchMock.mock.calls.some(([u]) => u.startsWith("/api/event?")),
     ).toBe(true);
 
-    // Subscribing from the pane updates its button in place.
+    // Subscribing while logged out asks the user to log in first (#19).
     detailPanel.querySelector("[data-action=subscribe]").click();
     await flush();
-    expect(
-      detailPanel.querySelector("[data-action=subscribe]").textContent,
-    ).toBe("Subscribed");
+    expect(document.querySelector("#login-reason").textContent).toBe(
+      "Log in to subscribe to this event.",
+    );
 
     // Made-up event URL → friendly not-found page.
     location.hash = "#/event/did:plc:nobody/doesnotexist";
@@ -362,7 +363,7 @@ async function bootApp(extraRoute = () => null, { initialUrl = "/" } = {}) {
     return jsonResponse(body ?? { error: "nf" }, body ? 200 : 404);
   });
   vi.stubGlobal("fetch", fetchMock);
-  await start();
+  await start({ config: await testConfig() });
   await flush();
   await flush();
   return fetchMock;

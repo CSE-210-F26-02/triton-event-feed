@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { findLexiconIssues } from "../src/lexicon/eventView.js";
+import {
+  buildSubscriptionRecord,
+  validateSubscription,
+} from "../src/lexicon/validateSubscription.js";
 import { createMockFetch } from "../src/stubs/mockApi.js";
 import { memoryStorage } from "./helpers.js";
 
@@ -67,6 +71,21 @@ describe("stubs/mockApi (the ?mock demo data, also usable by future e2e tests)",
     const labels = groups.body.map((facet) => facet.value);
     expect(labels).toContain("triton-eats");
     expect(labels.every((label) => typeof label === "string")).toBe(true);
+  });
+
+  it("gives every event a well-formed CID, so each one can be subscribed to", async () => {
+    const { body } = await getJson(createMockFetch(), "/api/events");
+    for (const event of body.events) {
+      expect(
+        validateSubscription(buildSubscriptionRecord(event)),
+        event.uri,
+      ).toEqual({ ok: true });
+    }
+  });
+
+  it("no longer serves the old anonymous /api/subscriptions endpoint", async () => {
+    const { status } = await getJson(createMockFetch(), "/api/subscriptions");
+    expect(status).toBe(404);
   });
 
   it("returns 404 for endpoints it does not know", async () => {

@@ -1,0 +1,12 @@
+{
+  "description": "subject points at a Bluesky post, not an app.communitymap.event record.",
+  "expectedErrorContains": "app.communitymap.event",
+  "record": {
+    "$type": "app.communitymap.subscription",
+    "subject": {
+      "uri": "at://did:plc:7iza6de2dwap2sbkpav7c6c6/app.bsky.feed.post/3lbxq7k2mzs2a",
+      "cid": "bafyreihooyosut5ztb3xty23uwoyij5ovnqr5qldanntxmah33quatfwoy"
+    },
+    "createdAt": "2026-11-26T18:00:00.000Z"
+  }
+}

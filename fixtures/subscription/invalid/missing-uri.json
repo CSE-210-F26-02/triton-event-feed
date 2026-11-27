@@ -1,0 +1,9 @@
+{
+  "description": "subject has a cid but no uri.",
+  "expectedErrorContains": "uri",
+  "record": {
+    "$type": "app.communitymap.subscription",
+    "subject": { "cid": "bafyreihooyosut5ztb3xty23uwoyij5ovnqr5qldanntxmah33quatfwoy" },
+    "createdAt": "2026-11-26T18:00:00.000Z"
+  }
+}

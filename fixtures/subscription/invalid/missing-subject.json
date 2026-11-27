@@ -1,0 +1,8 @@
+{
+  "description": "The required subject field is missing.",
+  "expectedErrorContains": "subject",
+  "record": {
+    "$type": "app.communitymap.subscription",
+    "createdAt": "2026-11-26T18:00:00.000Z"
+  }
+}
