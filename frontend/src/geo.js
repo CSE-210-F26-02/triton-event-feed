@@ -6,7 +6,10 @@
 /**
  * @param {{geolocation?: Geolocation|null, timeoutMs?: number}} [opts]
  */
-export function createGeo({ geolocation = globalThis.navigator?.geolocation ?? null, timeoutMs = 10000 } = {}) {
+export function createGeo({
+  geolocation = globalThis.navigator?.geolocation ?? null,
+  timeoutMs = 10000,
+} = {}) {
   /** @type {{lat: number, lng: number}|null} */
   let position = null;
 
@@ -24,14 +27,18 @@ export function createGeo({ geolocation = globalThis.navigator?.geolocation ?? n
      * @returns {Promise<{lat: number, lng: number}>}
      */
     request() {
-      if (!geolocation) return Promise.reject(new Error('Location is not available on this device'));
+      if (!geolocation)
+        return Promise.reject(
+          new Error("Location is not available on this device"),
+        );
       return new Promise((resolve, reject) => {
         geolocation.getCurrentPosition(
           (p) => {
             position = { lat: p.coords.latitude, lng: p.coords.longitude };
             resolve(position);
           },
-          (err) => reject(new Error(err?.message || 'Could not get your location')),
+          (err) =>
+            reject(new Error(err?.message || "Could not get your location")),
           { enableHighAccuracy: false, maximumAge: 60000, timeout: timeoutMs },
         );
       });

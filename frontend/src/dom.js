@@ -3,7 +3,14 @@
  * @module dom
  */
 
-const PROPS = new Set(['value', 'checked', 'selected', 'disabled', 'hidden', 'open']);
+const PROPS = new Set([
+  "value",
+  "checked",
+  "selected",
+  "disabled",
+  "hidden",
+  "open",
+]);
 
 /**
  * Create an element. Strings/numbers become text nodes (auto-escaped).
@@ -21,12 +28,12 @@ export function h(tag, props, ...children) {
 
 function setProp(el, key, val) {
   if (val == null || val === false) return;
-  if (key === 'class') el.className = val;
-  else if (key === 'dataset') Object.assign(el.dataset, val);
-  else if (key.startsWith('on') && typeof val === 'function') {
+  if (key === "class") el.className = val;
+  else if (key === "dataset") Object.assign(el.dataset, val);
+  else if (key.startsWith("on") && typeof val === "function") {
     el.addEventListener(key.slice(2).toLowerCase(), val);
   } else if (PROPS.has(key)) el[key] = val;
-  else el.setAttribute(key, val === true ? '' : String(val));
+  else el.setAttribute(key, val === true ? "" : String(val));
 }
 
 /**
@@ -49,7 +56,7 @@ export function append(el, children) {
 export function safeHttpUrl(url) {
   try {
     const u = new URL(url);
-    return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : null;
+    return u.protocol === "http:" || u.protocol === "https:" ? u.href : null;
   } catch {
     return null;
   }
@@ -61,9 +68,9 @@ export function safeHttpUrl(url) {
  */
 export function openDialog(dialog) {
   if (!dialog.isConnected) document.body.append(dialog);
-  if (typeof dialog.showModal === 'function') {
+  if (typeof dialog.showModal === "function") {
     if (!dialog.open) dialog.showModal();
-  } else dialog.setAttribute('open', '');
+  } else dialog.setAttribute("open", "");
 }
 
 /**
@@ -71,6 +78,6 @@ export function openDialog(dialog) {
  * @param {HTMLDialogElement} dialog
  */
 export function closeDialog(dialog) {
-  if (typeof dialog.close === 'function') dialog.close();
-  else dialog.removeAttribute('open');
+  if (typeof dialog.close === "function") dialog.close();
+  else dialog.removeAttribute("open");
 }

@@ -2,11 +2,11 @@
  * Anonymous event subscriptions + live notifications (SSE with reconnect and catch-up).
  * @module subscriptions
  */
-import { getStorage, randomId, storageGet, storageSet } from './util.js';
+import { getStorage, randomId, storageGet, storageSet } from "./util.js";
 
-const ID_KEY = 'cm:subscriber-id';
-const LAST_KEY = 'cm:last-notification-id';
-const ASKED_KEY = 'cm:notify-asked';
+const ID_KEY = "cm:subscriber-id";
+const LAST_KEY = "cm:last-notification-id";
+const ASKED_KEY = "cm:notify-asked";
 
 /**
  * Get (or create and persist) the anonymous subscriber id.
@@ -31,7 +31,9 @@ export function getSubscriberId(storage) {
 export function mergeNotifications(lastId, list) {
   const seen = new Set();
   const fresh = (list || [])
-    .filter((n) => typeof n.id === 'number' && (lastId == null || n.id > lastId))
+    .filter(
+      (n) => typeof n.id === "number" && (lastId == null || n.id > lastId),
+    )
     .filter((n) => !seen.has(n.id) && seen.add(n.id))
     .sort((a, b) => a.id - b.id);
   const next = fresh.length ? fresh[fresh.length - 1].id : lastId;
@@ -56,7 +58,7 @@ export function backoffMs(n, baseMs = 1000, maxMs = 30000) {
  */
 export function createSubscriptions({
   api,
-  storage = getStorage('localStorage'),
+  storage = getStorage("localStorage"),
   EventSourceImpl = globalThis.EventSource ?? null,
   NotificationImpl = globalThis.Notification ?? null,
   toast = () => {},
@@ -84,9 +86,12 @@ export function createSubscriptions({
   function deliver(n) {
     toast(n.message);
     const hidden = globalThis.document?.hidden;
-    if (hidden && NotificationImpl?.permission === 'granted') {
+    if (hidden && NotificationImpl?.permission === "granted") {
       try {
-        new NotificationImpl('Community Map', { body: n.message, tag: `cm-${n.id}` });
+        new NotificationImpl("Community Map", {
+          body: n.message,
+          tag: `cm-${n.id}`,
+        });
       } catch {
         /* some platforms only allow notifications from a service worker */
       }
@@ -142,9 +147,9 @@ export function createSubscriptions({
   }
 
   async function askPermissionOnce() {
-    if (!NotificationImpl || NotificationImpl.permission !== 'default') return;
+    if (!NotificationImpl || NotificationImpl.permission !== "default") return;
     if (storageGet(storage, ASKED_KEY)) return;
-    storageSet(storage, ASKED_KEY, '1');
+    storageSet(storage, ASKED_KEY, "1");
     try {
       await NotificationImpl.requestPermission();
     } catch {
