@@ -155,6 +155,35 @@ describe("detailView", () => {
     expect(api.getEvent).toHaveBeenCalledWith("at://x");
     expect(v.element.textContent).toContain("no longer available");
   });
+
+  it("shows a preloaded (just posted) event and keeps it when the index 404s", async () => {
+    const api = {
+      getEvent: vi.fn(async () => {
+        throw Object.assign(new Error("nf"), { status: 404 });
+      }),
+    };
+    const v = createDetailView({ api });
+    const ev = sampleEvent({ name: "Fresh event", pending: true });
+    const opening = v.open(ev.uri, { preload: ev });
+    expect(v.element.querySelector("#detail-title").textContent).toBe(
+      "Fresh event",
+    );
+    await opening;
+    expect(v.element.textContent).toContain("Fresh event");
+    expect(v.element.textContent).toMatch(/few seconds/);
+    expect(v.element.textContent).not.toContain("no longer available");
+  });
+
+  it("replaces the preload with the indexed copy once available", async () => {
+    const indexed = sampleEvent({ name: "Indexed name" });
+    const api = { getEvent: vi.fn(async () => ({ data: indexed })) };
+    const v = createDetailView({ api });
+    await v.open(indexed.uri, {
+      preload: sampleEvent({ name: "Local name", pending: true }),
+    });
+    expect(v.element.textContent).toContain("Indexed name");
+    expect(v.element.textContent).not.toMatch(/few seconds/);
+  });
 });
 
 describe("filterBar", () => {

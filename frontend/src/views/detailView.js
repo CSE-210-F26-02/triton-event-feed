@@ -119,7 +119,8 @@ export function renderDetail(ev, opts = {}) {
  * Create the detail dialog controller.
  * @param {{api: {getEvent(uri: string): Promise<{data: object, stale: boolean}>},
  *   canEdit?: (ev: object) => boolean, onEdit?: (ev: object) => void, onDelete?: (ev: object) => void}} deps
- * @returns {{open(uri: string): Promise<void>, close(): void, element: HTMLDialogElement}}
+ * @returns {{open(uri: string, opts?: {preload?: object}): Promise<void>, close(): void,
+ *   element: HTMLDialogElement}}
  */
 export function createDetailView({
   api,
@@ -144,15 +145,10 @@ export function createDetailView({
     body,
   );
 
-  async function open(uri) {
+  function show(data, stale) {
+    const close = () => closeDialog(dialog);
     body.replaceChildren(
-      h("p", { id: "detail-title", role: "status" }, "Loading…"),
-    );
-    openDialog(dialog);
-    try {
-      const { data, stale } = await api.getEvent(uri);
-      const close = () => closeDialog(dialog);
-      body.replaceChildren(
+      ...[
         ...renderDetail(data, {
           stale,
           canEdit: canEdit(data),
@@ -164,9 +160,34 @@ export function createDetailView({
             close();
             onDelete?.(ev);
           },
-        }).filter(Boolean),
+        }),
+        data.pending &&
+          h(
+            "p",
+            { class: "hint", role: "status" },
+            "Published to your Bluesky repository. It can take a few seconds to appear for everyone else.",
+          ),
+      ].filter(Boolean),
+    );
+  }
+
+  /**
+   * @param {string} uri
+   * @param {{preload?: object}} [opts] event to show right away (e.g. one just posted
+   *   that the indexer may not have seen yet); replaced by the server copy if available.
+   */
+  async function open(uri, { preload } = {}) {
+    if (preload) show(preload, false);
+    else
+      body.replaceChildren(
+        h("p", { id: "detail-title", role: "status" }, "Loading…"),
       );
+    openDialog(dialog);
+    try {
+      const { data, stale } = await api.getEvent(uri);
+      show(data, stale);
     } catch (err) {
+      if (preload) return; // not indexed yet: keep showing the local copy
       const msg =
         err?.status === 404
           ? "This event is no longer available."

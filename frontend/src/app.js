@@ -86,7 +86,7 @@ export async function start({
         seenCursors.add(nextCursor);
       } while (nextCursor);
       store.set({
-        events: merged,
+        events: append ? merged : keepPending(merged, store.get().events),
         cursor: nextCursor,
         stale: anyStale,
         savedAt,
@@ -155,8 +155,12 @@ export async function start({
     getWriter: writer,
     geo,
     toast,
-    onSaved: () => {
-      toast("Event saved. It can take a few seconds to appear.");
+    onSaved: (res) => {
+      const ev = pendingEventView(res, writer());
+      // Optimistic UI: show the event right away, then reconcile with the indexer.
+      store.set({ events: upsertEvent(store.get().events, ev) });
+      toast(res.isNew ? "Event posted." : "Event saved.");
+      detail.open(ev.uri, { preload: ev });
       setTimeout(() => {
         loadEvents();
         loadFacets();
@@ -318,6 +322,64 @@ export async function start({
   loadEvents();
   subs.load();
   registerServiceWorker();
+}
+
+const PENDING_TTL_MS = 2 * 60 * 1000;
+
+/**
+ * EventView for a record we just wrote but the indexer may not have seen yet.
+ * @param {{uri: string, cid?: string, record: object}} res result of a PDS write
+ * @param {{did?: string|null, handle?: string|null}|null} author
+ * @param {number} [now]
+ * @returns {object}
+ */
+export function pendingEventView(res, author, now = Date.now()) {
+  const { record } = res;
+  const live =
+    Date.parse(record.startsAt) <= now && now < Date.parse(record.endsAt);
+  return {
+    ...record,
+    uri: res.uri,
+    cid: res.cid ?? null,
+    authorDid: author?.did ?? null,
+    authorHandle: author?.handle ?? null,
+    source: "atproto",
+    tags: record.tags ?? [],
+    status: live ? "live" : "upcoming",
+    indexedAt: new Date(now).toISOString(),
+    updatedAt: new Date(now).toISOString(),
+    pending: true,
+    pendingSince: now,
+  };
+}
+
+/**
+ * Insert an event at the top, or replace it in place if its URI is already listed.
+ * @param {object[]} events
+ * @param {object} ev
+ * @returns {object[]}
+ */
+export function upsertEvent(events, ev) {
+  const i = events.findIndex((e) => e.uri === ev.uri);
+  if (i === -1) return [ev, ...events];
+  return events.map((e, j) => (j === i ? ev : e));
+}
+
+/**
+ * After a reload, keep recently posted events the indexer hasn't returned yet.
+ * Server copies win; pending entries expire after PENDING_TTL_MS.
+ * @param {object[]} fetched
+ * @param {object[]} current
+ * @param {number} [now]
+ * @returns {object[]}
+ */
+export function keepPending(fetched, current, now = Date.now()) {
+  const seen = new Set(fetched.map((e) => e.uri));
+  const pending = current.filter(
+    (e) =>
+      e.pending && !seen.has(e.uri) && now - e.pendingSince < PENDING_TTL_MS,
+  );
+  return [...pending, ...fetched];
 }
 
 function dedupe(events) {

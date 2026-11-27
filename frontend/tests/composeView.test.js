@@ -10,6 +10,7 @@ import {
   isoToLocalInput,
   localInputToIso,
   readForm,
+  saveErrorMessage,
   showErrors,
   validateForm,
 } from "../src/views/composeView.js";
@@ -233,6 +234,119 @@ describe("compose submit", () => {
       .dispatchEvent(new Event("submit", { cancelable: true }));
     await flush();
     expect(writer.createEvent).not.toHaveBeenCalled();
+  });
+
+  const openFilled = (writer, opts = {}) => {
+    const view = createComposeView({ getWriter: () => writer, ...opts });
+    view.open();
+    const form = view.element.querySelector("form");
+    fill(form, valid);
+    return { view, form };
+  };
+  const submitForm = (form) =>
+    form.dispatchEvent(new Event("submit", { cancelable: true }));
+
+  it("passes the uri, record and isNew to onSaved (for optimistic UI + redirect)", async () => {
+    const writer = {
+      createEvent: vi.fn(async () => ({ uri: "at://d/e/r1", cid: "c1" })),
+    };
+    const onSaved = vi.fn();
+    const { form } = openFilled(writer, { onSaved });
+    submitForm(form);
+    await flush();
+    expect(onSaved).toHaveBeenCalledWith({
+      uri: "at://d/e/r1",
+      cid: "c1",
+      isNew: true,
+      record: expect.objectContaining({ name: "Study jam" }),
+    });
+  });
+
+  it("on network failure keeps the input, shows an alert and retries successfully", async () => {
+    const writer = {
+      createEvent: vi
+        .fn()
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+        .mockResolvedValueOnce({ uri: "at://d/e/r1" }),
+    };
+    const onSaved = vi.fn();
+    const { form } = openFilled(writer, { onSaved });
+    submitForm(form);
+    await flush();
+    const status = form.querySelector(".form-status");
+    expect(status.getAttribute("role")).toBe("alert");
+    expect(status.textContent).toMatch(/Network error/);
+    expect(readForm(form)).toMatchObject({ name: "Study jam" });
+    expect(onSaved).not.toHaveBeenCalled();
+
+    form.querySelector("[data-action=retry]").click();
+    await flush();
+    expect(writer.createEvent).toHaveBeenCalledTimes(2);
+    expect(onSaved).toHaveBeenCalledTimes(1);
+    expect(form.querySelector("[data-action=retry]")).toBeNull();
+  });
+
+  it("ignores a second submit while the first is in flight (no duplicate event)", async () => {
+    const writer = { createEvent: vi.fn(async () => ({ uri: "at://d/e/r1" })) };
+    const { form } = openFilled(writer);
+    submitForm(form);
+    submitForm(form);
+    await flush();
+    expect(writer.createEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a loading state while posting and restores it afterwards", async () => {
+    let resolve;
+    const writer = {
+      createEvent: vi.fn(() => new Promise((r) => (resolve = r))),
+    };
+    const { form } = openFilled(writer);
+    const btn = form.querySelector("[type=submit]");
+    submitForm(form);
+    expect(btn.disabled).toBe(true);
+    expect(btn.textContent).toBe("Posting…");
+    expect(form.getAttribute("aria-busy")).toBe("true");
+    resolve({ uri: "at://d/e/r1" });
+    await flush();
+    expect(btn.disabled).toBe(false);
+    expect(btn.textContent).toBe("Create event");
+    expect(form.hasAttribute("aria-busy")).toBe(false);
+  });
+
+  it("retrying after a listener failure does not create the event twice", async () => {
+    const writer = {
+      createEvent: vi.fn(async () => ({ uri: "at://d/e/r1" })),
+      createListener: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("boom"))
+        .mockResolvedValueOnce({}),
+    };
+    const onSaved = vi.fn();
+    const { form } = openFilled(writer, { onSaved });
+    form.elements.hashtag.value = "#jam";
+    submitForm(form);
+    await flush();
+    expect(form.querySelector(".form-status").textContent).toBe(
+      "Could not save: boom",
+    );
+    form.querySelector("[data-action=retry]").click();
+    await flush();
+    expect(writer.createEvent).toHaveBeenCalledTimes(1);
+    expect(writer.createListener).toHaveBeenCalledTimes(2);
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps errors to user-facing messages", () => {
+    const xrpc = (error) =>
+      Object.assign(new Error(error), { name: "XrpcError", error });
+    expect(saveErrorMessage(xrpc("ExpiredToken"))).toMatch(/session expired/);
+    expect(saveErrorMessage(xrpc("InvalidToken"))).toMatch(/session expired/);
+    expect(saveErrorMessage(new TypeError("Failed to fetch"))).toMatch(
+      /Network error/,
+    );
+    expect(saveErrorMessage(xrpc("InvalidRecord"))).toBe(
+      "Could not save: InvalidRecord",
+    );
   });
 
   it("deletes after confirmation", async () => {

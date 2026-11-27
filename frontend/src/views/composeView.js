@@ -245,10 +245,41 @@ export function buildForm(ev) {
   );
 }
 
+const AUTH_ERRORS = new Set([
+  "ExpiredToken",
+  "InvalidToken",
+  "AuthenticationRequired",
+]);
+
+/**
+ * User-facing message for a failed PDS write.
+ * @param {Error & {status?: number, error?: string}} err
+ * @returns {string}
+ */
+export function saveErrorMessage(err) {
+  if (err?.message === "Not logged in" || AUTH_ERRORS.has(err?.error))
+    return "Your session expired. Log in again, then retry.";
+  // fetch() rejects with a TypeError when the network is unreachable.
+  if (err instanceof TypeError)
+    return "Network error: check your connection and retry.";
+  return `Could not save: ${err?.message || "unknown error"}`;
+}
+
+/**
+ * Show a status message; errors are announced immediately (role="alert").
+ * @param {HTMLElement} status
+ * @param {string} msg
+ * @param {boolean} [isError]
+ */
+function setStatus(status, msg, isError = false) {
+  status.setAttribute("role", isError ? "alert" : "status");
+  status.textContent = msg;
+}
+
 /**
  * Create the compose dialog controller.
  * @param {{getWriter: () => object|null, geo?: {request(): Promise<{lat: number, lng: number}>},
- *   onSaved?: (r: {uri: string}) => void, onDeleted?: (uri: string) => void,
+ *   onSaved?: (r: {uri: string, cid?: string, record: object, isNew: boolean}) => void, onDeleted?: (uri: string) => void,
  *   toast?: (msg: string, o?: object) => void, confirmImpl?: (msg: string) => boolean}} deps
  * @returns {{open(ev?: object|null): void, remove(ev: object): Promise<void>, element: HTMLDialogElement}}
  */
@@ -268,9 +299,16 @@ export function createComposeView({
   function open(ev = null) {
     const form = buildForm(ev);
     const status = form.querySelector(".form-status");
+    // Per-dialog write state: `saving` blocks double submits; `saved` / `listenerSaved`
+    // remember writes that already reached the PDS so a retry never duplicates them.
+    const state = { saving: false, saved: null, listenerSaved: false };
     form.addEventListener("submit", (e) => {
       e.preventDefault();
-      submit(form, ev, status);
+      if (state.saving) return;
+      state.saving = true;
+      submit(form, ev, status, state).finally(() => {
+        state.saving = false;
+      });
     });
     form.querySelector("[data-action=cancel]").onclick = () =>
       closeDialog(dialog);
@@ -295,7 +333,8 @@ export function createComposeView({
     }
   }
 
-  async function submit(form, ev, status) {
+  async function submit(form, ev, status, state) {
+    form.querySelector("[data-action=retry]")?.remove();
     const values = readForm(form);
     const { record, errors } = validateForm(
       values,
@@ -306,22 +345,43 @@ export function createComposeView({
     showErrors(form, errors);
     if (Object.keys(errors).length) return;
     const writer = getWriter();
-    if (!writer) return void (status.textContent = "Log in to post events.");
+    if (!writer) return setStatus(status, "Log in to post events.", true);
     const btn = form.querySelector("[type=submit]");
+    const label = btn.textContent;
     btn.disabled = true;
-    status.textContent = "Saving…";
+    btn.textContent = ev ? "Saving…" : "Posting…";
+    form.setAttribute("aria-busy", "true");
+    setStatus(status, ev ? "Saving…" : "Posting to your Bluesky repository…");
     try {
-      const res = ev
+      // If the record write succeeded on an earlier attempt (e.g. only the listener
+      // failed), don't write it again — that would create a duplicate event.
+      state.saved ??= ev
         ? await writer.updateEvent(parseAtUri(ev.uri).rkey, record)
         : await writer.createEvent(record);
-      if (values.hashtag.trim())
-        await writer.createListener(res.uri, values.hashtag);
+      if (values.hashtag.trim() && !state.listenerSaved) {
+        await writer.createListener(state.saved.uri, values.hashtag);
+        state.listenerSaved = true;
+      }
       closeDialog(dialog);
-      onSaved?.(res);
+      onSaved?.({ ...state.saved, record, isNew: !ev });
     } catch (err) {
-      status.textContent = `Could not save: ${err.message}`;
+      setStatus(status, saveErrorMessage(err), true);
+      status.after(
+        h(
+          "button",
+          {
+            type: "button",
+            class: "btn",
+            dataset: { action: "retry" },
+            onclick: () => form.requestSubmit(),
+          },
+          "Retry",
+        ),
+      );
     } finally {
       btn.disabled = false;
+      btn.textContent = label;
+      form.removeAttribute("aria-busy");
     }
   }
 
