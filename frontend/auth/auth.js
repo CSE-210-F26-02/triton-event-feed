@@ -37,19 +37,11 @@ class AuthProvider
      * Constructs the oAuth client used by this provider. Should be called exactly once. 
      */
     async preInitClient() {
-        if (isLocal()) {
-            // Loopback client as suggested by https://github.com/bluesky-social/atproto/tree/main/packages/oauth/oauth-client-browser
-            this.#oAuthClient = new BrowserOAuthClient({
-                handleResolver: HandleResolver,
-                clientMetadata: undefined,
-            });
-        } else {
-            // Apparently possible to avoid trip to fetch metadata document, see top link
-            this.#oAuthClient = await BrowserOAuthClient.load({
-                clientId: this.#clientID,
-                handleResolver: HandleResolver,
-            });
-        }
+        // Apparently possible to avoid trip to fetch metadata document, see top link
+        this.#oAuthClient = await BrowserOAuthClient.load({
+            clientId: this.#clientID,
+            handleResolver: HandleResolver,
+        });
 
         // TODO: Handles session invalidation
         // Based on snippet from https://www.npmjs.com/package/@atproto/oauth-client-browser
@@ -136,7 +128,6 @@ class AuthProvider
  * @returns A URL (string) representing the Client ID for an authorization request.
  */
 function buildClientID() {
-    // TODO: Might be able to just remove this
     if (isLocal()) {
         return `http://localhost?${new URLSearchParams({
             // Specifies all permissions we may need from this authorization.
@@ -154,6 +145,7 @@ function buildClientID() {
 
 function isLocal() {
     // Checks if current hostname is a synonym for the local host
+    // Should only ever use 127.0.0.1, but localhost is included for completeness
     return ["localhost", "127.0.0.1"].includes(window.location.hostname);
 }
 

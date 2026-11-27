@@ -1,4 +1,4 @@
-import { AuthProvider } from "./auth/auth";
+import { AuthProvider } from "../auth";
 
 // Just a quick demo of the auth provider.
 
@@ -8,17 +8,26 @@ import { AuthProvider } from "./auth/auth";
 
 const auth = new AuthProvider();
 
+function checkSession(){
+    const validSession = auth.isSessionValid()
+
+    console.log(`Session valid: ${validSession}`);
+    if (validSession) {
+        console.log(`Session: ${auth.session.sub}`)
+    } 
+}
+
 await auth.preInitClient();
 const initOutcome = await auth.initClient();
 if (initOutcome) {
     console.log("Successful login");
+    checkSession();
 } else {
-    auth.login("chherbert.bsky.social");
+    
 }
 
-const validSession = auth.isSessionValid()
+document.getElementById("bsky-oauth-login").onclick = (event) => {
+    auth.login(document.getElementById("user-handle").value);
+    checkSession();
+};
 
-console.log(`Session valid: ${validSession}`);
-if (validSession) {
-    console.log(`Session: ${auth.session.sub}`)
-} 

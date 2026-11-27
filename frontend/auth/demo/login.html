@@ -1,0 +1,26 @@
+<!doctype html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Triton Event Feed Login</title>
+  <link rel="stylesheet" href="../../style.css" />
+  <script type="module" src="auth_test.js"></script>
+</head>
+<body>
+  <div class="container">
+    <h1>Login</h1>
+    <div>
+        <label for="user-handle">User Handle:</label>
+        <input type="text" id="user-handle" spellcheck="false" size="20">
+    </div>
+    <input type="button" value="Login with BlueSky OAuth" id="bsky-oauth-login">
+    <h2>Developer/Legacy Login</h2>
+
+    <div>
+        <label for="app-pw">App Password:</label>
+        <input type="text" id="app-pw" spellcheck="false" size="20">
+    </div>
+    <input type="button" value="Submit">
+    
+  </div>
+</body>
