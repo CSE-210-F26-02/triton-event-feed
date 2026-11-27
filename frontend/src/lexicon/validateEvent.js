@@ -166,8 +166,9 @@ export function validateEvent(record) {
   if (record && typeof record === "object") {
     const { startsAt, endsAt, location } = /** @type {any} */ (record);
 
-    const start = typeof startsAt === "string" ? Date.parse(startsAt) : NaN;
-    const end = typeof endsAt === "string" ? Date.parse(endsAt) : NaN;
+    const start =
+      typeof startsAt === "string" ? Date.parse(startsAt) : Number.NaN;
+    const end = typeof endsAt === "string" ? Date.parse(endsAt) : Number.NaN;
     if (!Number.isNaN(start) && !Number.isNaN(end) && end <= start) {
       errors.push({ path: "endsAt", message: "endsAt must be after startsAt" });
     }
