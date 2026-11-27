@@ -1,0 +1,26 @@
+{
+  "description": "Every field, including description, tags, location name/address, and a group strongRef.",
+  "record": {
+    "$type": "app.communitymap.event",
+    "name": "Triton Hackathon Kickoff",
+    "description": "Kick off the weekend hackathon with team formation, pizza, and a short intro to AT Protocol. All majors welcome!",
+    "startsAt": "2026-12-04T17:00:00.000-08:00",
+    "endsAt": "2026-12-04T20:00:00.000-08:00",
+    "location": {
+      "lat": "32.8797",
+      "lng": "-117.2362",
+      "name": "Price Center Ballroom East",
+      "address": "9500 Gilman Dr, La Jolla, CA 92093"
+    },
+    "tags": [
+      "hackathon",
+      "cse",
+      "free-food"
+    ],
+    "group": {
+      "uri": "at://did:plc:7iza6de2dwap2sbkpav7c6c6/app.communitymap.group/3lbxq7k2mzs2a",
+      "cid": "bafyreihooyosut5ztb3xty23uwoyij5ovnqr5qldanntxmah33quatfwoy"
+    },
+    "createdAt": "2026-11-25T12:00:00.000Z"
+  }
+}

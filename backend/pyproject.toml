@@ -7,5 +7,18 @@ requires-python = ">=3.12"
 dependencies = [
     "dotenv>=0.9.9",
     "fastapi>=0.163.1",
+    "regex>=2026.11.25",
     "uvicorn>=0.54.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
+
+[tool.pytest.ini_options]
+# Code imports the backend as a package ("from backend.lexicon import ..."),
+# like main.py does, so the repo root (the folder above backend/) must be
+# importable when pytest runs from inside backend/.
+pythonpath = [".."]
+testpaths = ["tests"]

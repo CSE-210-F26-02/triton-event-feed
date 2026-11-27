@@ -1,0 +1,14 @@
+{
+  "description": "The required name field is missing.",
+  "expectedErrorContains": "name",
+  "record": {
+    "$type": "app.communitymap.event",
+    "startsAt": "2026-12-01T18:00:00.000Z",
+    "endsAt": "2026-12-01T21:00:00.000Z",
+    "location": {
+      "lat": "32.8812",
+      "lng": "-117.2375"
+    },
+    "createdAt": "2026-11-20T09:30:00.000Z"
+  }
+}
