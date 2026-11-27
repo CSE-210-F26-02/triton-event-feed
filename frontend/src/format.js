@@ -78,13 +78,64 @@ export function osmUrl(event) {
     : null;
 }
 
+/** EventView.status values sent by the AppView (docs/projects/triton-event-feed/CONTRACTS.md). */
+export const EVENT_STATUS = Object.freeze({
+  UPCOMING: "upcoming",
+  LIVE: "live",
+  ENDING_SOON: "ending_soon",
+  ENDED: "ended",
+});
+
+/** Badge text per status; "upcoming" has no badge. */
+const STATUS_LABELS = Object.freeze({
+  [EVENT_STATUS.LIVE]: "Happening now",
+  [EVENT_STATUS.ENDING_SOON]: "Ending soon",
+  [EVENT_STATUS.ENDED]: "Ended",
+});
+
 /**
- * Status badge text for EventView.status, or null for "upcoming".
+ * Badges per status, in display order. An event that is ending soon is also still
+ * happening, so it gets both badges. Each `modifier` is the `badge--<modifier>` CSS class.
+ */
+const STATUS_BADGES = Object.freeze({
+  [EVENT_STATUS.LIVE]: [EVENT_STATUS.LIVE],
+  [EVENT_STATUS.ENDING_SOON]: [EVENT_STATUS.LIVE, EVENT_STATUS.ENDING_SOON],
+  [EVENT_STATUS.ENDED]: [EVENT_STATUS.ENDED],
+});
+
+/**
+ * Primary status badge text for EventView.status, or null for "upcoming" / unknown.
  * @param {string} status
  * @returns {string|null}
  */
 export function statusLabel(status) {
-  return { live: "Live", ending_soon: "Ending soon" }[status] ?? null;
+  return Object.hasOwn(STATUS_LABELS, status) ? STATUS_LABELS[status] : null;
+}
+
+/**
+ * Status badge descriptors for EventView.status (empty for "upcoming" / unknown).
+ * @param {string} status
+ * @returns {{label: string, modifier: string}[]}
+ */
+export function statusBadges(status) {
+  const modifiers = Object.hasOwn(STATUS_BADGES, status)
+    ? STATUS_BADGES[status]
+    : [];
+  return modifiers.map((modifier) => ({
+    label: STATUS_LABELS[modifier],
+    modifier,
+  }));
+}
+
+/**
+ * Status to badge an event with: "ended" whenever the event is over (even if the
+ * AppView has not marked it yet), otherwise its EventView.status.
+ * @param {{status?: string}} event
+ * @param {boolean} ended result of filters.isEnded for this event
+ * @returns {string|undefined}
+ */
+export function displayStatus(event, ended) {
+  return ended ? EVENT_STATUS.ENDED : event?.status;
 }
 
 /**

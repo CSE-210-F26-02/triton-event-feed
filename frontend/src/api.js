@@ -1,5 +1,5 @@
 /**
- * HTTP client for the Community Map AppView (docs/CONTRACTS.md).
+ * HTTP client for the Community Map AppView (docs/projects/triton-event-feed/CONTRACTS.md).
  *
  * Every GET resolves to `{data, stale}`. On network failure, timeout or 5xx, a GET falls
  * back to the last cached response with `stale: true` (and `savedAt`). Writes never fall back.

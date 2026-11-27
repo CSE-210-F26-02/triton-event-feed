@@ -3,7 +3,7 @@
  * - GET /api/*: network-first, falling back to the cached copy (marked with x-cm-stale: 1).
  * - Never cached: non-GET requests and the SSE notification stream.
  */
-const VERSION = "v13";
+const VERSION = "v14";
 const SHELL_CACHE = `cm-shell-${VERSION}`;
 const API_CACHE = `cm-api-${VERSION}`;
 const SHELL = [
@@ -36,6 +36,7 @@ const SHELL = [
   "./src/views/loginView.js",
   "./src/views/mapView.js",
   "./src/views/dateFilter.js",
+  "./src/views/statusBadges.js",
 ];
 
 self.addEventListener("install", (event) => {

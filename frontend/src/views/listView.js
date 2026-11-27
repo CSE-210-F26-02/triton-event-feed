@@ -4,15 +4,30 @@
  * @module views/listView
  */
 import { createElementTree } from "../dom.js";
-import { groupByDay, isEnded, isUpdated } from "../filters.js";
+import {
+  SORT_ORDERS,
+  groupByDay,
+  isEnded,
+  isUpdated,
+  normalizeSortOrder,
+} from "../filters.js";
 import { describeGroup } from "../lexicon/eventView.js";
+import { renderStatusBadges } from "./statusBadges.js";
 import { renderSubscribeButton } from "./subscribeButton.js";
 import {
+  displayStatus,
   formatDistance,
   formatTimeWindow,
   osmUrl,
-  statusLabel,
 } from "../format.js";
+
+/** Heading (and its element id) of the single section used by the "newest" order. */
+export const NEWEST_SECTION_TITLE = "Newest";
+const NEWEST_SECTION_ID = "sort-newest";
+
+/** Shown when there are no events to list. */
+export const EMPTY_LIST_MESSAGE =
+  "No events match your filters. Try clearing a tag or search.";
 
 /**
  * @typedef {{onOpen?: (uri: string) => void, onTagClick?: (tag: string) => void,
@@ -58,7 +73,7 @@ export function renderCard(event, options = {}) {
     idPrefix = CARD_ID_PREFIX,
   } = options;
   const titleId = `${idPrefix}-${hashId(event.uri)}`;
-  const status = statusLabel(event.status);
+  const ended = isEnded(event, options.now);
   const href = osmUrl(event);
   const isSub = subscribed.has(event.uri);
   const distance = formatDistance(event.distanceKm);
@@ -70,12 +85,7 @@ export function renderCard(event, options = {}) {
     createElementTree(
       "div",
       { class: "card__badges" },
-      status &&
-        createElementTree(
-          "span",
-          { class: `badge badge--${event.status}` },
-          status,
-        ),
+      ...renderStatusBadges(displayStatus(event, ended)),
       isUpdated(event) &&
         createElementTree("span", { class: "badge badge--updated" }, "Updated"),
     ),
@@ -144,12 +154,62 @@ export function renderCard(event, options = {}) {
       { class: "card__actions" },
       renderSubscribeButton(event, {
         subscribed: isSub,
-        ended: isEnded(event, options.now),
+        ended,
         variant: "plain",
         dataset: { focusKey: `sub:${event.uri}` },
         onToggle: onToggleSubscribe,
       }),
     ),
+  );
+}
+
+/**
+ * One titled section of event cards.
+ * @param {string} sectionId id of the section heading
+ * @param {string} title heading text
+ * @param {object[]} events EventViews
+ * @param {CardOpts} options
+ * @returns {HTMLElement}
+ */
+function renderEventSection(sectionId, title, events, options) {
+  return createElementTree(
+    "section",
+    { class: "day", "aria-labelledby": sectionId },
+    createElementTree("h2", { class: "day__title", id: sectionId }, title),
+    createElementTree(
+      "div",
+      { class: "grid" },
+      events.map((event) => renderCard(event, options)),
+    ),
+  );
+}
+
+/**
+ * Sections for the list. "newest" keeps the AppView's order in a single section (day
+ * headings would repeat out of order); every other order groups cards by day.
+ * @param {object[]} events EventViews, in the order to show them
+ * @param {ListState} state
+ * @returns {HTMLElement[]}
+ */
+export function renderEventSections(events, state) {
+  if (normalizeSortOrder(state.sort) === SORT_ORDERS.NEWEST) {
+    return [
+      renderEventSection(
+        NEWEST_SECTION_ID,
+        NEWEST_SECTION_TITLE,
+        events,
+        state,
+      ),
+    ];
+  }
+  return groupByDay(events, { now: state.now, locale: state.locale }).map(
+    (dayGroup) =>
+      renderEventSection(
+        `day-${dayGroup.key}`,
+        dayGroup.label,
+        dayGroup.events,
+        state,
+      ),
   );
 }
 
@@ -162,7 +222,8 @@ function hashId(text) {
 
 /**
  * @typedef {{events: object[], hasMore?: boolean, loading?: boolean, stale?: boolean,
- *   savedAt?: number, error?: string|null, now?: Date} & CardOpts} ListState
+ *   savedAt?: number, error?: string|null, now?: Date, sort?: string} & CardOpts} ListState
+ * `sort` is a filters.SORT_ORDERS value (missing / unknown means the default order).
  */
 
 /**
@@ -216,34 +277,13 @@ export function createListView(
           state.error,
         ),
       );
-    const groups = groupByDay(state.events || [], {
-      now: state.now,
-      locale: state.locale,
-    });
-    if (!groups.length && !state.loading && !state.error) {
+    const events = state.events || [];
+    if (!events.length && !state.loading && !state.error) {
       nodes.push(
-        createElementTree(
-          "p",
-          { class: "empty" },
-          "No events match your filters. Try clearing a tag or search.",
-        ),
+        createElementTree("p", { class: "empty" }, EMPTY_LIST_MESSAGE),
       );
     }
-    for (const dayGroup of groups) {
-      const id = `day-${dayGroup.key}`;
-      nodes.push(
-        createElementTree(
-          "section",
-          { class: "day", "aria-labelledby": id },
-          createElementTree("h2", { class: "day__title", id }, dayGroup.label),
-          createElementTree(
-            "div",
-            { class: "grid" },
-            dayGroup.events.map((event) => renderCard(event, state)),
-          ),
-        ),
-      );
-    }
+    if (events.length) nodes.push(...renderEventSections(events, state));
     if (state.loading)
       nodes.push(
         createElementTree(

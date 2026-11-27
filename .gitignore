@@ -1,3 +1,21 @@
 DS_Store
-
 claude.md
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+data/
+
+# Node
+node_modules/
+
+# Playwright
+e2e/test-results/
+e2e/playwright-report/
+
+# macOS
+.DS_Store

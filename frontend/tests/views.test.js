@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createFilterBar } from "../src/views/filterBar.js";
+import { SORT_OPTIONS, createFilterBar } from "../src/views/filterBar.js";
 import {
   assertMapConfig,
   buildMarkers,
@@ -242,6 +242,36 @@ describe("filterBar", () => {
     root.querySelector("button.btn").click();
     expect(onChange).toHaveBeenLastCalledWith({ nearMe: true });
     vi.useRealTimers();
+  });
+
+  it("renders a labelled sort select that reflects and emits the sort order", () => {
+    const onChange = vi.fn();
+    const root = document.createElement("div");
+    document.body.replaceChildren(root);
+    const filterBar = createFilterBar(root, { onChange });
+    const baseState = { tags: [], group: "", searchText: "", nearMe: false };
+    filterBar.render({ ...baseState, sort: "newest" });
+    const sort = root.querySelector("#f-sort");
+    expect(root.querySelector("label[for=f-sort]").textContent).toBe(
+      "Sort events",
+    );
+    expect([...sort.options].map((option) => option.textContent)).toEqual(
+      SORT_OPTIONS.map((sortOption) => sortOption.label),
+    );
+    expect(sort.value).toBe("newest");
+    sort.value = "soonest";
+    sort.dispatchEvent(new Event("change"));
+    expect(onChange).toHaveBeenLastCalledWith({ sort: "soonest" });
+  });
+
+  it("shows the default sort order when the state has none or an unknown one", () => {
+    const root = document.createElement("div");
+    const filterBar = createFilterBar(root, { onChange: vi.fn() });
+    const baseState = { tags: [], group: "", searchText: "", nearMe: false };
+    filterBar.render(baseState);
+    expect(root.querySelector("#f-sort").value).toBe("soonest");
+    filterBar.render({ ...baseState, sort: "bogus" });
+    expect(root.querySelector("#f-sort").value).toBe("soonest");
   });
 });
 

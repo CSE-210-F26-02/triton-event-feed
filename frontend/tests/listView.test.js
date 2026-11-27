@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createListView, renderCard } from "../src/views/listView.js";
+import {
+  EMPTY_LIST_MESSAGE,
+  NEWEST_SECTION_TITLE,
+  createListView,
+  renderCard,
+} from "../src/views/listView.js";
 import {
   SUBSCRIBED_LABEL,
   SUBSCRIBE_LABEL,
@@ -65,23 +70,51 @@ describe("renderCard", () => {
     );
   });
 
-  it("shows status badge, updated marker and subscribed state", () => {
+  it("shows status badges, updated marker and subscribed state", () => {
     const event = sampleEvent({
       status: "ending_soon",
       updatedAt: "2026-11-10T05:00:00Z",
     });
-    const card = renderCard(event, { subscribed: new Set([event.uri]) });
+    const card = renderCard(event, {
+      subscribed: new Set([event.uri]),
+      now: BEFORE_SAMPLE_ENDS,
+    });
     const badges = [...card.querySelectorAll(".badge")].map(
       (badge) => badge.textContent,
     );
-    expect(badges).toEqual(["Ending soon", "Updated"]);
+    // An event that is ending soon is still happening, so it gets both badges.
+    expect(badges).toEqual(["Happening now", "Ending soon", "Updated"]);
     expect(card.querySelector(".btn").getAttribute("aria-pressed")).toBe(
       "true",
     );
     expect(
-      renderCard(sampleEvent({ status: "live" })).querySelector(".badge")
-        .textContent,
-    ).toBe("Live");
+      renderCard(sampleEvent({ status: "live" }), {
+        now: BEFORE_SAMPLE_ENDS,
+      }).querySelector(".badge").textContent,
+    ).toBe("Happening now");
+  });
+
+  it("shows no status badge for upcoming events", () => {
+    const card = renderCard(sampleEvent({ status: "upcoming" }), {
+      now: BEFORE_SAMPLE_ENDS,
+    });
+    expect(card.querySelector(".badge--live")).toBeNull();
+    expect(card.querySelector(".badge--ended")).toBeNull();
+  });
+
+  it("badges ended events as Ended, from the AppView status or the end time", () => {
+    const markedEnded = renderCard(sampleEvent({ status: "ended" }), {
+      now: BEFORE_SAMPLE_ENDS,
+    });
+    expect(markedEnded.querySelector(".badge--ended").textContent).toBe(
+      "Ended",
+    );
+    // Not yet marked by the AppView, but its end time has passed.
+    const pastEndTime = renderCard(sampleEvent({ status: "live" }), {
+      now: AFTER_SAMPLE_ENDS,
+    });
+    expect(pastEndTime.querySelector(".badge--ended")).not.toBeNull();
+    expect(pastEndTime.querySelector(".badge--live")).toBeNull();
   });
 
   it("escapes user content", () => {
@@ -175,7 +208,46 @@ describe("createListView", () => {
       events: [],
       now,
     });
+    expect(root.querySelector(".empty").textContent).toBe(EMPTY_LIST_MESSAGE);
+  });
+
+  it("shows the empty state for the newest order too", () => {
+    createListView(root, { IntersectionObserverImpl: null }).render({
+      events: [],
+      now,
+      sort: "newest",
+    });
     expect(root.querySelector(".empty")).not.toBeNull();
+    expect(root.querySelector("section")).toBeNull();
+  });
+
+  it("newest order keeps the AppView order in one section without day headings", () => {
+    createListView(root, { IntersectionObserverImpl: null }).render({
+      events: [makeEvent(3, 12), makeEvent(1, 11), makeEvent(2, 12)],
+      now,
+      sort: "newest",
+    });
+    const sections = root.querySelectorAll("section");
+    expect(sections).toHaveLength(1);
+    expect(sections[0].querySelector("h2").textContent).toBe(
+      NEWEST_SECTION_TITLE,
+    );
+    expect(
+      [...sections[0].querySelectorAll("h3")].map((title) => title.textContent),
+    ).toEqual(["E3", "E1", "E2"]);
+  });
+
+  it("groups by day for the soonest order and for unknown or missing orders", () => {
+    for (const sort of ["soonest", "bogus", undefined, null]) {
+      createListView(root, { IntersectionObserverImpl: null }).render({
+        events: [makeEvent(1, 11), makeEvent(2, 12)],
+        now,
+        sort,
+      });
+      expect(
+        [...root.querySelectorAll("h2")].map((heading) => heading.textContent),
+      ).toEqual(["Today", "Tomorrow"]);
+    }
   });
 
   it("shows the stale/offline banner and errors", () => {

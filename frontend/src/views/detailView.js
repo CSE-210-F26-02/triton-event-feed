@@ -12,10 +12,10 @@ import { createElementTree, safeHttpUrl } from "../dom.js";
 import { isEnded, isUpdated } from "../filters.js";
 import {
   blueskyProfileUrl,
+  displayStatus,
   formatDateTime,
   formatEventWhen,
   osmUrl,
-  statusLabel,
 } from "../format.js";
 import {
   findLexiconIssues,
@@ -24,6 +24,7 @@ import {
   toDisplayEvent,
 } from "../lexicon/eventView.js";
 import { createPinMap } from "./mapView.js";
+import { renderStatusBadges } from "./statusBadges.js";
 import {
   PRIVACY_NOTE_ID,
   SUBSCRIBE_LABEL,
@@ -131,19 +132,13 @@ const renderHeaderNotices = (event, options, ended) => [
  */
 function renderHeader(event, options) {
   const ended = isEnded(event, options.now);
-  const status = ended ? null : statusLabel(event.status);
   return createElementTree(
     "header",
     { class: "detail__header" },
     createElementTree(
       "div",
       { class: "card__badges" },
-      status &&
-        createElementTree(
-          "span",
-          { class: `badge badge--${event.status}` },
-          status,
-        ),
+      ...renderStatusBadges(displayStatus(event, ended)),
       options.stale &&
         createElementTree("span", { class: "badge" }, "Saved copy"),
     ),

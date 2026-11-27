@@ -1,11 +1,46 @@
 /**
- * Filter bar: debounced text search, group select, tag chips, "Near me" toggle.
+ * Filter bar: debounced text search, group select, sort order, tag chips, "Near me" toggle.
  * Stateless UI: it renders a FilterState and reports changes via onChange(patch).
  * @module views/filterBar
  */
 import { createElementTree } from "../dom.js";
-import { toggleTag } from "../filters.js";
+import {
+  DEFAULT_SORT_ORDER,
+  SORT_ORDERS,
+  normalizeSortOrder,
+  toggleTag,
+} from "../filters.js";
 import { debounce } from "../util.js";
+
+/** Sort select options, in display order. */
+export const SORT_OPTIONS = Object.freeze([
+  Object.freeze({ value: SORT_ORDERS.SOONEST, label: "Soonest" }),
+  Object.freeze({ value: SORT_ORDERS.NEWEST, label: "Newest" }),
+]);
+
+/**
+ * Sort order `<select>`; reports a change as onChange({sort}).
+ * @param {(patch: {sort: string}) => void} onChange
+ * @returns {HTMLSelectElement}
+ */
+function createSortSelect(onChange) {
+  return createElementTree(
+    "select",
+    {
+      id: "f-sort",
+      name: "sort",
+      onchange: (changeEvent) =>
+        onChange({ sort: normalizeSortOrder(changeEvent.target.value) }),
+    },
+    SORT_OPTIONS.map((sortOption) =>
+      createElementTree(
+        "option",
+        { value: sortOption.value },
+        sortOption.label,
+      ),
+    ),
+  );
+}
 
 /**
  * @param {HTMLElement} root
@@ -19,7 +54,13 @@ export function createFilterBar(
   root,
   { onChange, debounceMs = 300, geoSupported = true },
 ) {
-  let state = { tags: [], group: "", searchText: "", nearMe: false };
+  let state = {
+    tags: [],
+    group: "",
+    searchText: "",
+    nearMe: false,
+    sort: DEFAULT_SORT_ORDER,
+  };
   const emitQ = debounce((searchText) => onChange({ searchText }), debounceMs);
 
   const search = createElementTree("input", {
@@ -35,6 +76,7 @@ export function createFilterBar(
     name: "group",
     onchange: (changeEvent) => onChange({ group: changeEvent.target.value }),
   });
+  const sort = createSortSelect(onChange);
   const nearMe = createElementTree(
     "button",
     {
@@ -67,6 +109,12 @@ export function createFilterBar(
         "Search events",
       ),
       search,
+      createElementTree(
+        "label",
+        { for: "f-sort", class: "visually-hidden" },
+        "Sort events",
+      ),
+      sort,
       nearMe,
     ),
     chips,
@@ -83,6 +131,7 @@ export function createFilterBar(
     )
       search.value = filterState.searchText;
     renderGroups(groups, filterState.group);
+    sort.value = normalizeSortOrder(filterState.sort);
     nearMe.setAttribute("aria-pressed", String(filterState.nearMe));
     nearMe.textContent = nearMeBusy ? "Locating…" : "Near me";
     renderChips(tags, filterState.tags);

@@ -108,7 +108,20 @@ describe("detailView.renderDetail", () => {
       "This event has ended",
     );
     expect(ended.querySelector(".badge--live")).toBeNull();
+    expect(ended.querySelector(".badge--ended").textContent).toBe("Ended");
     expect(ended.querySelector("[data-action=subscribe]")).toBeNull();
+  });
+
+  it("shows both badges for an event that is ending soon", () => {
+    const article = renderDetail(sampleEvent({ status: "ending_soon" }), {
+      ...UTC_OPTIONS,
+      now: new Date("2026-11-11T20:30:00Z"),
+    });
+    expect(
+      [...article.querySelectorAll(".detail__header .badge")].map(
+        (badge) => badge.textContent,
+      ),
+    ).toEqual(["Happening now", "Ending soon"]);
   });
 
   it("only links http(s) source URLs", () => {

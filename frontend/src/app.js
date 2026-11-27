@@ -184,7 +184,7 @@ export async function start({ config, mockConfig } = {}) {
     }
     if (!filters.nearMe) geo.clear();
     store.set({ filters });
-    const refetch = ["tags", "group", "searchText"].some(
+    const refetch = ["tags", "group", "searchText", "sort"].some(
       (filterKey) => filterKey in patch,
     );
     if (refetch) loadEvents();
@@ -379,6 +379,7 @@ export async function start({ config, mockConfig } = {}) {
       onTagClick: (tag) =>
         changeFilters({ tags: toggleTag(store.get().filters.tags, tag) }),
       onToggleSubscribe: (event) => subscribing.toggle(event),
+      sort: state.filters.sort,
     });
     map.show(shown);
     detail.refreshActions();

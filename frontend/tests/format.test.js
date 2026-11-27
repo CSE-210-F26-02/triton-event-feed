@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { blueskyProfileUrl, formatEventWhen } from "../src/format.js";
+import {
+  EVENT_STATUS,
+  blueskyProfileUrl,
+  displayStatus,
+  formatEventWhen,
+  statusBadges,
+  statusLabel,
+} from "../src/format.js";
 
 const UTC_OPTIONS = { locale: "en-US", timeZone: "UTC" };
 
@@ -45,5 +52,53 @@ describe("format.blueskyProfileUrl", () => {
       "https://bsky.app/profile/did:plc:abc",
     );
     expect(blueskyProfileUrl("../evil", "nope")).toBeNull();
+  });
+});
+
+describe("format.statusLabel", () => {
+  it("labels live, ending soon and ended events", () => {
+    expect(statusLabel(EVENT_STATUS.LIVE)).toBe("Happening now");
+    expect(statusLabel(EVENT_STATUS.ENDING_SOON)).toBe("Ending soon");
+    expect(statusLabel(EVENT_STATUS.ENDED)).toBe("Ended");
+  });
+
+  it("has no label for upcoming, unknown or inherited keys", () => {
+    expect(statusLabel(EVENT_STATUS.UPCOMING)).toBeNull();
+    expect(statusLabel("bogus")).toBeNull();
+    expect(statusLabel(undefined)).toBeNull();
+    expect(statusLabel("toString")).toBeNull();
+    expect(statusLabel("__proto__")).toBeNull();
+  });
+});
+
+describe("format.statusBadges", () => {
+  it("gives ending-soon events both the happening-now and ending-soon badges", () => {
+    expect(statusBadges("ending_soon")).toEqual([
+      { label: "Happening now", modifier: "live" },
+      { label: "Ending soon", modifier: "ending_soon" },
+    ]);
+  });
+
+  it("gives live and ended events one badge each", () => {
+    expect(statusBadges("live")).toEqual([
+      { label: "Happening now", modifier: "live" },
+    ]);
+    expect(statusBadges("ended")).toEqual([
+      { label: "Ended", modifier: "ended" },
+    ]);
+  });
+
+  it("gives upcoming, unknown and inherited keys no badges", () => {
+    for (const status of ["upcoming", "bogus", undefined, null, "constructor"])
+      expect(statusBadges(status)).toEqual([]);
+  });
+});
+
+describe("format.displayStatus", () => {
+  it("is ended whenever the event is over, else the AppView status", () => {
+    expect(displayStatus({ status: "live" }, true)).toBe("ended");
+    expect(displayStatus({ status: "live" }, false)).toBe("live");
+    expect(displayStatus({}, false)).toBeUndefined();
+    expect(displayStatus(null, false)).toBeUndefined();
   });
 });

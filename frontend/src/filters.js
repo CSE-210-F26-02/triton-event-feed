@@ -4,7 +4,26 @@
  */
 
 /**
- * @typedef {{tags: string[], group: string, searchText: string, nearMe: boolean}} FilterState
+ * Event list orders the AppView supports (GET /api/events?sort=).
+ * "soonest" (by start time) is the server default, so it is never sent.
+ */
+export const SORT_ORDERS = Object.freeze({
+  SOONEST: "soonest",
+  NEWEST: "newest",
+});
+
+/** Sort order used when the filter state has none (or an unknown one). */
+export const DEFAULT_SORT_ORDER = SORT_ORDERS.SOONEST;
+
+/**
+ * @typedef {{tags: string[], group: string, searchText: string, nearMe: boolean,
+ *   sort: string}} FilterState
+ */
+
+/**
+ * Map bounds for GET /api/events?bbox=. A preformatted "west,south,east,north" string is
+ * also accepted.
+ * @typedef {{west: number, south: number, east: number, north: number}} BoundingBox
  */
 
 /** @type {FilterState} */
@@ -13,23 +32,57 @@ export const EMPTY_FILTERS = Object.freeze({
   group: "",
   searchText: "",
   nearMe: false,
+  sort: DEFAULT_SORT_ORDER,
 });
 
 /**
  * Build GET /api/events params from filter state. `nearMe` is never sent (privacy).
  * @param {FilterState} filters
- * @param {{cursor?: string|null, limit?: number}} [page]
+ * @param {{cursor?: string|null, limit?: number, bbox?: BoundingBox|string|null}} [page]
  * @returns {Record<string, any>}
  */
-export function buildEventQuery(filters, { cursor = null, limit = 20 } = {}) {
+export function buildEventQuery(
+  filters,
+  { cursor = null, limit = 20, bbox = null } = {},
+) {
   const params = { limit };
   if (filters.tags?.length) params.tag = [...filters.tags];
   if (filters.group) params.group = filters.group;
   const searchText = (filters.searchText || "").trim();
   // "q" is the AppView's name for the search query parameter (GET /api/events?q=).
   if (searchText) params.q = searchText;
+  const sortOrder = normalizeSortOrder(filters.sort);
+  if (sortOrder !== DEFAULT_SORT_ORDER) params.sort = sortOrder;
+  const boundingBox = formatBoundingBox(bbox);
+  if (boundingBox) params.bbox = boundingBox;
   if (cursor) params.cursor = cursor;
   return params;
+}
+
+/**
+ * Return `sortOrder` when it is one of SORT_ORDERS, else the default order.
+ * @param {unknown} sortOrder
+ * @returns {string}
+ */
+export function normalizeSortOrder(sortOrder) {
+  return Object.values(SORT_ORDERS).includes(sortOrder)
+    ? sortOrder
+    : DEFAULT_SORT_ORDER;
+}
+
+/**
+ * Format map bounds as the AppView's "west,south,east,north" bbox parameter.
+ * @param {BoundingBox|string|null|undefined} bbox
+ * @returns {string|null} null when bbox is absent or any edge is not a finite number
+ */
+export function formatBoundingBox(bbox) {
+  if (bbox == null) return null;
+  if (typeof bbox === "string") return bbox.trim() || null;
+  const edges = [bbox.west, bbox.south, bbox.east, bbox.north];
+  const allFinite = edges.every(
+    (edge) => typeof edge === "number" && Number.isFinite(edge),
+  );
+  return allFinite ? edges.join(",") : null;
 }
 
 /**

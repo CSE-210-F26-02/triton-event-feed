@@ -108,6 +108,22 @@ describe("app (smoke)", () => {
       ),
     ).toBe(true);
 
+    // Changing the sort order refetches events with the new order.
+    const sortSelect = document.querySelector("#f-sort");
+    sortSelect.value = "newest";
+    sortSelect.dispatchEvent(new Event("change"));
+    await flush();
+    expect(
+      fetchMock.mock.calls.some(
+        ([url]) =>
+          url.startsWith("/api/events?") && url.includes("sort=newest"),
+      ),
+    ).toBe(true);
+    expect(document.querySelector("#list h2").textContent).toBe("Newest");
+    sortSelect.value = "soonest";
+    sortSelect.dispatchEvent(new Event("change"));
+    await flush();
+
     expect(document.querySelector("[role=tablist]")).toBeNull();
     expect(document.querySelector("#panel-map").hidden).toBe(false);
     expect(document.querySelector("#panel-list").hidden).toBe(false);

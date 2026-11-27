@@ -3,24 +3,35 @@ name = "triton-event-feed-backend"
 version = "0.1.0"
 description = "Backend for the Triton Event Feed application."
 readme = "README.md"
-requires-python = ">=3.12"
+# 3.11 is the floor because the Dockerfile and ci.yml both run Python 3.11;
+# backend.yml runs 3.12, which this range also covers.
+requires-python = ">=3.11"
 dependencies = [
-    "dotenv>=0.9.9",
-    "fastapi>=0.163.1",
-    "regex>=2026.11.25",
-    "uvicorn>=0.54.0",
+  "dotenv>=0.9.9",
+  "fastapi==0.163.1",
+  "regex>=2026.11.25",
+  "uvicorn[standard]==0.54.0",
+  "pydantic==2.14.3",
+  "pydantic-settings==2.16.2",
+  "websockets==17.4",
+  "httpx==0.28.1",
+  "icalendar==7.3.0",
 ]
 
+# ci.yml installs these with `pip install -e ".[dev]"`; the uv dev group below
+# lists the same packages for `uv sync`. Keep the two lists in step.
+[project.optional-dependencies]
+dev = ["pytest==9.2.0", "pytest-asyncio==1.4.1.post1", "ruff==0.17.4"]
+
 [dependency-groups]
-dev = [
-    "pytest>=9.2.0",
-]
+dev = ["pytest==9.2.0", "pytest-asyncio==1.4.1.post1", "ruff==0.17.4"]
 
 [tool.pytest.ini_options]
 # Code imports the backend as a package ("from backend.lexicon import ..."),
 # like main.py does, so the repo root (the folder above backend/) must be
 # importable when pytest runs from inside backend/.
 pythonpath = [".."]
+asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.black]
@@ -28,3 +39,18 @@ testpaths = ["tests"]
 # limit, black wraps long lines in parentheses itself, so names never have
 # to be shortened to fit.
 line-length = 79
+
+[tool.ruff]
+# Same 79-character limit as black and flake8 so all three agree.
+line-length = 79
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]

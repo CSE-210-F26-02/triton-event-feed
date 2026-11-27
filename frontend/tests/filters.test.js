@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { toQueryString } from "../src/api.js";
 import {
+  DEFAULT_SORT_ORDER,
   EMPTY_FILTERS,
+  SORT_ORDERS,
   buildEventQuery,
+  formatBoundingBox,
+  normalizeSortOrder,
   coordsOf,
   groupByDay,
   haversineKm,
@@ -153,5 +157,77 @@ describe("isEnded", () => {
       isEnded({ status: "ended", endsAt: "2030-01-01T00:00:00Z" }, now),
     ).toBe(true);
     expect(isEnded({ endsAt: "not a date" }, now)).toBe(false);
+  });
+});
+
+describe("buildEventQuery sort (#sorting)", () => {
+  it("defaults to soonest, which is the server default and never sent", () => {
+    expect(EMPTY_FILTERS.sort).toBe(DEFAULT_SORT_ORDER);
+    expect(DEFAULT_SORT_ORDER).toBe(SORT_ORDERS.SOONEST);
+    expect(buildEventQuery({ ...EMPTY_FILTERS })).not.toHaveProperty("sort");
+  });
+
+  it("sends a non-default sort order", () => {
+    expect(
+      buildEventQuery({ ...EMPTY_FILTERS, sort: SORT_ORDERS.NEWEST }).sort,
+    ).toBe("newest");
+  });
+
+  it("never sends an unknown or malformed sort order", () => {
+    for (const sort of ["bogus", "", null, undefined, 7, { evil: true }]) {
+      expect(buildEventQuery({ ...EMPTY_FILTERS, sort })).not.toHaveProperty(
+        "sort",
+      );
+    }
+  });
+});
+
+describe("normalizeSortOrder", () => {
+  it("keeps known orders and falls back to the default for anything else", () => {
+    expect(normalizeSortOrder("soonest")).toBe("soonest");
+    expect(normalizeSortOrder("newest")).toBe("newest");
+    expect(normalizeSortOrder("NEWEST")).toBe(DEFAULT_SORT_ORDER);
+    expect(normalizeSortOrder(undefined)).toBe(DEFAULT_SORT_ORDER);
+    expect(normalizeSortOrder(["newest"])).toBe(DEFAULT_SORT_ORDER);
+  });
+});
+
+describe("buildEventQuery bbox", () => {
+  it("formats a bounding box as west,south,east,north", () => {
+    expect(
+      buildEventQuery(EMPTY_FILTERS, {
+        bbox: { west: -117.3, south: 32.8, east: -117.2, north: 32.9 },
+      }).bbox,
+    ).toBe("-117.3,32.8,-117.2,32.9");
+  });
+
+  it("passes a preformatted bbox string through (trimmed)", () => {
+    expect(buildEventQuery(EMPTY_FILTERS, { bbox: " 1,2,3,4 " }).bbox).toBe(
+      "1,2,3,4",
+    );
+  });
+
+  it("omits bbox when absent", () => {
+    expect(buildEventQuery(EMPTY_FILTERS)).not.toHaveProperty("bbox");
+    expect(buildEventQuery(EMPTY_FILTERS, { bbox: null })).not.toHaveProperty(
+      "bbox",
+    );
+  });
+});
+
+describe("formatBoundingBox", () => {
+  it("rejects boxes with missing, non-numeric or non-finite edges", () => {
+    expect(formatBoundingBox({ west: 1, south: 2, east: 3 })).toBeNull();
+    expect(
+      formatBoundingBox({ west: "1", south: 2, east: 3, north: 4 }),
+    ).toBeNull();
+    expect(
+      formatBoundingBox({ west: NaN, south: 2, east: 3, north: 4 }),
+    ).toBeNull();
+    expect(
+      formatBoundingBox({ west: 1, south: 2, east: Infinity, north: 4 }),
+    ).toBeNull();
+    expect(formatBoundingBox("   ")).toBeNull();
+    expect(formatBoundingBox(undefined)).toBeNull();
   });
 });
