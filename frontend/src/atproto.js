@@ -3,17 +3,17 @@
  * user's own PDS. Session lives in memory + sessionStorage (cleared when the tab closes).
  * @module atproto
  */
-import { EVENT_NSID, LISTENER_NSID, buildListenerRecord } from './records.js';
-import { getStorage, storageGet, storageSet } from './util.js';
+import { EVENT_NSID, LISTENER_NSID, buildListenerRecord } from "./records.js";
+import { getStorage, storageGet, storageSet } from "./util.js";
 
-const SESSION_KEY = 'cm:atproto-session';
+const SESSION_KEY = "cm:atproto-session";
 
 /** Error from an XRPC call. */
 export class XrpcError extends Error {
   /** @param {number} status @param {string} error @param {string} [message] */
   constructor(status, error, message) {
     super(message || error || `XRPC ${status}`);
-    this.name = 'XrpcError';
+    this.name = "XrpcError";
     this.status = status;
     this.error = error;
   }
@@ -26,9 +26,13 @@ export class XrpcError extends Error {
  */
 export function pdsFromDidDoc(doc) {
   const svc = (doc?.service || []).find(
-    (s) => (s.id === '#atproto_pds' || s.id?.endsWith('#atproto_pds')) && s.type === 'AtprotoPersonalDataServer',
+    (s) =>
+      (s.id === "#atproto_pds" || s.id?.endsWith("#atproto_pds")) &&
+      s.type === "AtprotoPersonalDataServer",
   );
-  return svc?.serviceEndpoint ? String(svc.serviceEndpoint).replace(/\/$/, '') : null;
+  return svc?.serviceEndpoint
+    ? String(svc.serviceEndpoint).replace(/\/$/, "")
+    : null;
 }
 
 /**
@@ -37,11 +41,13 @@ export function pdsFromDidDoc(doc) {
  * @param {string} [plcBase]
  * @returns {string}
  */
-export function didDocUrl(did, plcBase = 'https://plc.directory') {
-  if (did.startsWith('did:plc:')) return `${plcBase}/${did}`;
-  if (did.startsWith('did:web:')) {
-    const [host, ...path] = did.slice(8).split(':').map(decodeURIComponent);
-    return path.length ? `https://${host}/${path.join('/')}/did.json` : `https://${host}/.well-known/did.json`;
+export function didDocUrl(did, plcBase = "https://plc.directory") {
+  if (did.startsWith("did:plc:")) return `${plcBase}/${did}`;
+  if (did.startsWith("did:web:")) {
+    const [host, ...path] = did.slice(8).split(":").map(decodeURIComponent);
+    return path.length
+      ? `https://${host}/${path.join("/")}/did.json`
+      : `https://${host}/.well-known/did.json`;
   }
   throw new Error(`Unsupported DID method: ${did}`);
 }
@@ -53,14 +59,14 @@ export function didDocUrl(did, plcBase = 'https://plc.directory') {
  */
 export function createAtprotoWriter({
   fetchImpl = (...a) => fetch(...a),
-  storage = getStorage('sessionStorage'),
-  resolverBases = ['https://public.api.bsky.app', 'https://bsky.social'],
-  plcBase = 'https://plc.directory',
+  storage = getStorage("sessionStorage"),
+  resolverBases = ["https://public.api.bsky.app", "https://bsky.social"],
+  plcBase = "https://plc.directory",
 } = {}) {
   /** @type {{did: string, handle: string, accessJwt: string, refreshJwt: string, pds: string}|null} */
   let session = null;
   try {
-    session = JSON.parse(storageGet(storage, SESSION_KEY) || 'null');
+    session = JSON.parse(storageGet(storage, SESSION_KEY) || "null");
   } catch {
     session = null;
   }
@@ -70,11 +76,15 @@ export function createAtprotoWriter({
     return text ? JSON.parse(text) : {};
   }
 
-  async function call(url, { method = 'GET', body, token } = {}) {
-    const headers = { Accept: 'application/json' };
-    if (body !== undefined) headers['Content-Type'] = 'application/json';
+  async function call(url, { method = "GET", body, token } = {}) {
+    const headers = { Accept: "application/json" };
+    if (body !== undefined) headers["Content-Type"] = "application/json";
     if (token) headers.Authorization = `Bearer ${token}`;
-    const res = await fetchImpl(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    const res = await fetchImpl(url, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
     const data = await json(res).catch(() => ({}));
     if (!res.ok) throw new XrpcError(res.status, data.error, data.message);
     return data;
@@ -85,7 +95,9 @@ export function createAtprotoWriter({
     for (const base of resolverBases) {
       try {
         const q = encodeURIComponent(handle);
-        const { did } = await call(`${base}/xrpc/com.atproto.identity.resolveHandle?handle=${q}`);
+        const { did } = await call(
+          `${base}/xrpc/com.atproto.identity.resolveHandle?handle=${q}`,
+        );
         if (did) return did;
       } catch (err) {
         lastErr = err;
@@ -97,7 +109,7 @@ export function createAtprotoWriter({
   async function resolvePds(did) {
     const doc = await call(didDocUrl(did, plcBase));
     const pds = pdsFromDidDoc(doc);
-    if (!pds) throw new Error('No PDS found in DID document');
+    if (!pds) throw new Error("No PDS found in DID document");
     return pds;
   }
 
@@ -107,18 +119,34 @@ export function createAtprotoWriter({
   }
 
   async function refresh() {
-    const data = await call(`${session.pds}/xrpc/com.atproto.server.refreshSession`, {
-      method: 'POST',
-      token: session.refreshJwt,
+    const data = await call(
+      `${session.pds}/xrpc/com.atproto.server.refreshSession`,
+      {
+        method: "POST",
+        token: session.refreshJwt,
+      },
+    );
+    save({
+      ...session,
+      accessJwt: data.accessJwt,
+      refreshJwt: data.refreshJwt,
+      handle: data.handle || session.handle,
     });
-    save({ ...session, accessJwt: data.accessJwt, refreshJwt: data.refreshJwt, handle: data.handle || session.handle });
   }
 
-  const isExpired = (err) => err instanceof XrpcError && (err.status === 401 || err.status === 400) && err.error === 'ExpiredToken';
+  const isExpired = (err) =>
+    err instanceof XrpcError &&
+    (err.status === 401 || err.status === 400) &&
+    err.error === "ExpiredToken";
 
   async function xrpcPost(nsid, body) {
-    if (!session) throw new Error('Not logged in');
-    const go = () => call(`${session.pds}/xrpc/${nsid}`, { method: 'POST', body, token: session.accessJwt });
+    if (!session) throw new Error("Not logged in");
+    const go = () =>
+      call(`${session.pds}/xrpc/${nsid}`, {
+        method: "POST",
+        body,
+        token: session.accessJwt,
+      });
     try {
       return await go();
     } catch (err) {
@@ -128,10 +156,11 @@ export function createAtprotoWriter({
     }
   }
 
-  const uriOf = (collection, rkey) => `at://${session.did}/${collection}/${rkey}`;
+  const uriOf = (collection, rkey) =>
+    `at://${session.did}/${collection}/${rkey}`;
 
   return {
-    kind: 'atproto',
+    kind: "atproto",
     /** @returns {string|null} logged-in DID */
     get did() {
       return session?.did ?? null;
@@ -151,14 +180,20 @@ export function createAtprotoWriter({
      * @returns {Promise<{did: string, handle: string}>}
      */
     async login(identifier, appPassword) {
-      const id = identifier.trim().replace(/^@/, '');
-      const did = id.startsWith('did:') ? id : await resolveHandle(id);
+      const id = identifier.trim().replace(/^@/, "");
+      const did = id.startsWith("did:") ? id : await resolveHandle(id);
       const pds = await resolvePds(did);
       const data = await call(`${pds}/xrpc/com.atproto.server.createSession`, {
-        method: 'POST',
+        method: "POST",
         body: { identifier: id, password: appPassword },
       });
-      save({ did: data.did, handle: data.handle, accessJwt: data.accessJwt, refreshJwt: data.refreshJwt, pds });
+      save({
+        did: data.did,
+        handle: data.handle,
+        accessJwt: data.accessJwt,
+        refreshJwt: data.refreshJwt,
+        pds,
+      });
       return { did: data.did, handle: data.handle };
     },
     /** Log out (best-effort server-side deleteSession) and clear local session. */
@@ -166,7 +201,10 @@ export function createAtprotoWriter({
       const s = session;
       save(null);
       if (s) {
-        await call(`${s.pds}/xrpc/com.atproto.server.deleteSession`, { method: 'POST', token: s.refreshJwt }).catch(() => {});
+        await call(`${s.pds}/xrpc/com.atproto.server.deleteSession`, {
+          method: "POST",
+          token: s.refreshJwt,
+        }).catch(() => {});
       }
     },
     /**
@@ -174,7 +212,7 @@ export function createAtprotoWriter({
      * @returns {Promise<{uri: string, cid: string}>}
      */
     createEvent(record) {
-      return xrpcPost('com.atproto.repo.createRecord', {
+      return xrpcPost("com.atproto.repo.createRecord", {
         repo: session?.did,
         collection: EVENT_NSID,
         record: { ...record, $type: EVENT_NSID },
@@ -185,7 +223,7 @@ export function createAtprotoWriter({
      * @returns {Promise<{uri: string, cid: string}>}
      */
     updateEvent(rkey, record) {
-      return xrpcPost('com.atproto.repo.putRecord', {
+      return xrpcPost("com.atproto.repo.putRecord", {
         repo: session?.did,
         collection: EVENT_NSID,
         rkey,
@@ -194,7 +232,11 @@ export function createAtprotoWriter({
     },
     /** @param {string} rkey @returns {Promise<{uri: string}>} */
     async deleteEvent(rkey) {
-      await xrpcPost('com.atproto.repo.deleteRecord', { repo: session?.did, collection: EVENT_NSID, rkey });
+      await xrpcPost("com.atproto.repo.deleteRecord", {
+        repo: session?.did,
+        collection: EVENT_NSID,
+        rkey,
+      });
       return { uri: uriOf(EVENT_NSID, rkey) };
     },
     /**
@@ -202,7 +244,7 @@ export function createAtprotoWriter({
      * @returns {Promise<{uri: string, cid: string}>}
      */
     createListener(eventUri, hashtag) {
-      return xrpcPost('com.atproto.repo.createRecord', {
+      return xrpcPost("com.atproto.repo.createRecord", {
         repo: session?.did,
         collection: LISTENER_NSID,
         record: buildListenerRecord(eventUri, hashtag),
