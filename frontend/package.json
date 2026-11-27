@@ -4,9 +4,13 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "serve": "npx --yes serve -l 5173 ."
+    "serve": "npx --yes serve -l 5173 .",
+    "lint": "eslint.js"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.16.0",
+    "globals": "^17.14.0",
     "jsdom": "^25.0.1",
     "vitest": "^2.1.8"
   }
