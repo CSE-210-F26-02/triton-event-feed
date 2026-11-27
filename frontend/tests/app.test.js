@@ -1,12 +1,11 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { jsonResponse, memoryStorage, sampleEvent } from './helpers.js';
 
 globalThis.__CM_NO_AUTOSTART__ = true;
 const { start } = await import('../src/app.js');
 
-const html = readFileSync(resolve(__dirname, '../index.html'), 'utf8');
+const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 function routes(url) {
