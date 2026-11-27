@@ -120,6 +120,7 @@ class Notification(_Camel):
     message: str
     created_at: datetime
 
+
 class Page(_Camel):
     events: list[IndexedEvent]
     cursor: str | None = None

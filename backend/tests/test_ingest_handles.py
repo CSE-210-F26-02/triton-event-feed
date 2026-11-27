@@ -10,9 +10,9 @@ def resolver(
 ) -> HandleResolver:
     t = clock if clock is not None else [0.0]
     return HandleResolver(
-    httpx.AsyncClient(transport=handler),
-    clock=lambda: t[0],
-    **kw,  # type: ignore[arg-type]
+        httpx.AsyncClient(transport=handler),
+        clock=lambda: t[0],
+        **kw,  # type: ignore[arg-type]
     )
 
 
