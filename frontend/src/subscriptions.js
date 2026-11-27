@@ -45,7 +45,7 @@ export class SubscriptionError extends Error {
  * @property {string} did the logged-in user's DID
  * @property {() => Promise<import('./atproto.js').ListedRecord[]>} listSubscriptions
  * @property {(record: object) => Promise<{uri: string, cid: string}>} createSubscription
- * @property {(rkey: string) => Promise<unknown>} deleteSubscription
+ * @property {(recordKey: string) => Promise<unknown>} deleteSubscription
  */
 
 /**
@@ -53,21 +53,24 @@ export class SubscriptionError extends Error {
  * An event can have several records (e.g. subscribed from two tabs at once); all are
  * kept so unsubscribing removes every one. Invalid records are counted, not kept.
  * @param {unknown} listed com.atproto.repo.listRecords entries
- * @returns {{byEvent: Map<string, string[]>, skipped: number}}
+ * @returns {{recordKeysByEvent: Map<string, string[]>, skippedCount: number}}
  */
 export function indexSubscriptionRecords(listed) {
-  const byEvent = new Map();
-  let skipped = 0;
+  const recordKeysByEvent = new Map();
+  let skippedCount = 0;
   for (const entry of Array.isArray(listed) ? listed : []) {
-    const rkey = parseAtUri(entry?.uri)?.rkey;
-    if (!rkey || !validateSubscription(entry.value).ok) {
-      skipped++;
+    const recordKey = parseAtUri(entry?.uri)?.recordKey;
+    if (!recordKey || !validateSubscription(entry.value).ok) {
+      skippedCount++;
       continue;
     }
     const eventUri = entry.value.subject.uri;
-    byEvent.set(eventUri, [...(byEvent.get(eventUri) ?? []), rkey]);
+    recordKeysByEvent.set(eventUri, [
+      ...(recordKeysByEvent.get(eventUri) ?? []),
+      recordKey,
+    ]);
   }
-  return { byEvent, skipped };
+  return { recordKeysByEvent, skippedCount };
 }
 
 /**
@@ -114,12 +117,12 @@ export function createSubscriptions({
   onChange = () => {},
   now = () => new Date(),
 }) {
-  let byEvent = new Map();
+  let recordKeysByEvent = new Map();
   let ownerDid = null;
   let loadSequence = 0;
   const pending = new Set(); // event URIs with a request in flight
 
-  const changed = () => onChange(new Set(byEvent.keys()));
+  const changed = () => onChange(new Set(recordKeysByEvent.keys()));
 
   function requireRepo() {
     const repo = getRepo();
@@ -136,7 +139,7 @@ export function createSubscriptions({
     const repo = getRepo();
     const listed = repo ? await repo.listSubscriptions() : [];
     if (sequence !== loadSequence) return; // a newer load / clear won
-    byEvent = indexSubscriptionRecords(listed).byEvent;
+    recordKeysByEvent = indexSubscriptionRecords(listed).recordKeysByEvent;
     ownerDid = repo?.did ?? null;
     changed();
   }
@@ -145,14 +148,14 @@ export function createSubscriptions({
   async function subscribe(event) {
     const repo = requireRepo();
     const uri = event?.uri;
-    if (byEvent.has(uri) || pending.has(uri)) return true;
+    if (recordKeysByEvent.has(uri) || pending.has(uri)) return true;
     const record = subscriptionRecordFor(event, now());
     pending.add(uri);
     try {
       const created = await repo.createSubscription(record);
-      const rkey = parseAtUri(created?.uri)?.rkey;
-      if (rkey) byEvent.set(uri, [rkey]);
-      else await load(); // created, but the PDS gave no URI: re-list to learn its rkey
+      const recordKey = parseAtUri(created?.uri)?.recordKey;
+      if (recordKey) recordKeysByEvent.set(uri, [recordKey]);
+      else await load(); // created, but the PDS gave no URI: re-list to learn its record key
     } finally {
       pending.delete(uri);
     }
@@ -163,14 +166,15 @@ export function createSubscriptions({
   /** Delete every subscription record for `uri`. Resolves to false (not subscribed). */
   async function unsubscribe(uri) {
     const repo = requireRepo();
-    if (pending.has(uri)) return byEvent.has(uri);
+    if (pending.has(uri)) return recordKeysByEvent.has(uri);
     pending.add(uri);
     try {
-      for (const rkey of [...(byEvent.get(uri) ?? [])]) {
-        await repo.deleteSubscription(rkey);
-        const left = byEvent.get(uri)?.filter((key) => key !== rkey) ?? [];
-        if (left.length) byEvent.set(uri, left);
-        else byEvent.delete(uri);
+      for (const recordKey of [...(recordKeysByEvent.get(uri) ?? [])]) {
+        await repo.deleteSubscription(recordKey);
+        const remainingKeys =
+          recordKeysByEvent.get(uri)?.filter((key) => key !== recordKey) ?? [];
+        if (remainingKeys.length) recordKeysByEvent.set(uri, remainingKeys);
+        else recordKeysByEvent.delete(uri);
       }
     } finally {
       pending.delete(uri);
@@ -185,17 +189,19 @@ export function createSubscriptions({
     unsubscribe,
     /** Subscribe, or unsubscribe when already subscribed. Resolves to the new state. */
     toggle: (event) =>
-      byEvent.has(event?.uri) ? unsubscribe(event.uri) : subscribe(event),
+      recordKeysByEvent.has(event?.uri)
+        ? unsubscribe(event.uri)
+        : subscribe(event),
     /** Forget everything (on logout); cancels an in-flight load. */
     clear() {
       loadSequence++;
-      byEvent = new Map();
+      recordKeysByEvent = new Map();
       ownerDid = null;
       changed();
     },
-    has: (uri) => byEvent.has(uri),
+    has: (uri) => recordKeysByEvent.has(uri),
     get subscribed() {
-      return new Set(byEvent.keys());
+      return new Set(recordKeysByEvent.keys());
     },
     get ownerDid() {
       return ownerDid;

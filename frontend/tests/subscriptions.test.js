@@ -9,7 +9,7 @@ import {
 } from "../src/subscriptions.js";
 import { lexiconEventView, sampleEvent } from "./helpers.js";
 
-const ME = "did:plc:me";
+const MY_DID = "did:plc:me";
 /** Before the full fixture's event (Dec 4, 2026) starts. */
 const BEFORE = new Date("2026-12-01T00:00:00Z");
 /** After it ended. */
@@ -24,8 +24,8 @@ const eventB = lexiconEventView(fullFixture.record, {
 });
 
 /** A listRecords entry for a subscription to `event`, with record key `rkey`. */
-const listed = (event, rkey) => ({
-  uri: `at://${ME}/${SUBSCRIPTION_NSID}/${rkey}`,
+const listed = (event, recordKey) => ({
+  uri: `at://${MY_DID}/${SUBSCRIPTION_NSID}/${recordKey}`,
   cid: event.cid,
   value: {
     $type: SUBSCRIPTION_NSID,
@@ -39,21 +39,26 @@ function fakeRepo(initial = []) {
   const records = [...initial];
   let nextKey = 0;
   return {
-    did: ME,
+    did: MY_DID,
     records,
     listSubscriptions: vi.fn(async () => [...records]),
     createSubscription: vi.fn(async (record) => {
-      const rkey = `3new${nextKey++}`;
+      const recordKey = `3new${nextKey++}`;
       records.push({
-        uri: `at://${ME}/${SUBSCRIPTION_NSID}/${rkey}`,
+        uri: `at://${MY_DID}/${SUBSCRIPTION_NSID}/${recordKey}`,
         cid: "c",
         value: record,
       });
-      return { uri: `at://${ME}/${SUBSCRIPTION_NSID}/${rkey}`, cid: "c" };
+      return {
+        uri: `at://${MY_DID}/${SUBSCRIPTION_NSID}/${recordKey}`,
+        cid: "c",
+      };
     }),
-    deleteSubscription: vi.fn(async (rkey) => {
-      const i = records.findIndex((r) => r.uri.endsWith(`/${rkey}`));
-      if (i >= 0) records.splice(i, 1);
+    deleteSubscription: vi.fn(async (recordKey) => {
+      const recordIndex = records.findIndex((record) =>
+        record.uri.endsWith(`/${recordKey}`),
+      );
+      if (recordIndex >= 0) records.splice(recordIndex, 1);
     }),
   };
 }
@@ -61,49 +66,49 @@ function fakeRepo(initial = []) {
 /** Build a store around `repo` (null = logged out). */
 function setup({ repo = fakeRepo(), now = BEFORE } = {}) {
   const onChange = vi.fn();
-  let current = repo;
+  let currentRepo = repo;
   const subs = createSubscriptions({
-    getRepo: () => current,
+    getRepo: () => currentRepo,
     onChange,
     now: () => now,
   });
-  return { subs, repo, onChange, logout: () => (current = null) };
+  return { subs, repo, onChange, logout: () => (currentRepo = null) };
 }
 
 describe("indexSubscriptionRecords", () => {
   it("maps each event URI to its subscription record keys", () => {
-    const { byEvent, skipped } = indexSubscriptionRecords([
+    const { recordKeysByEvent, skippedCount } = indexSubscriptionRecords([
       listed(eventA, "3k1"),
       listed(eventB, "3k2"),
       listed(eventA, "3k3"), // duplicate (e.g. two tabs)
     ]);
-    expect([...byEvent]).toEqual([
+    expect([...recordKeysByEvent]).toEqual([
       [eventA.uri, ["3k1", "3k3"]],
       [eventB.uri, ["3k2"]],
     ]);
-    expect(skipped).toBe(0);
+    expect(skippedCount).toBe(0);
   });
 
   it("skips records that break the lexicon or have no record key", () => {
     const notAnEvent = listed(eventA, "3k4");
     notAnEvent.value.subject.uri = "at://did:plc:x/app.bsky.feed.post/1";
-    const { byEvent, skipped } = indexSubscriptionRecords([
+    const { recordKeysByEvent, skippedCount } = indexSubscriptionRecords([
       notAnEvent,
       { uri: "garbage", value: listed(eventA, "x").value },
-      { uri: `at://${ME}/${SUBSCRIPTION_NSID}/3k5`, value: { nope: true } },
+      { uri: `at://${MY_DID}/${SUBSCRIPTION_NSID}/3k5`, value: { nope: true } },
       null,
       listed(eventB, "3k6"),
     ]);
-    expect([...byEvent.keys()]).toEqual([eventB.uri]);
-    expect(skipped).toBe(4);
+    expect([...recordKeysByEvent.keys()]).toEqual([eventB.uri]);
+    expect(skippedCount).toBe(4);
   });
 
   it.each([null, undefined, "records", {}])(
     "returns nothing for a non-array (%j)",
     (value) => {
       expect(indexSubscriptionRecords(value)).toEqual({
-        byEvent: new Map(),
-        skipped: 0,
+        recordKeysByEvent: new Map(),
+        skippedCount: 0,
       });
     },
   );
@@ -116,7 +121,7 @@ describe("createSubscriptions", () => {
     });
     await subs.load();
     expect(subs.has(eventA.uri)).toBe(true);
-    expect(subs.ownerDid).toBe(ME);
+    expect(subs.ownerDid).toBe(MY_DID);
     expect(onChange).toHaveBeenLastCalledWith(new Set([eventA.uri]));
   });
 
@@ -177,7 +182,7 @@ describe("createSubscriptions", () => {
 
   it("refuses to subscribe to an ended event", async () => {
     const { subs, repo } = setup({ now: AFTER });
-    const error = await subs.subscribe(eventA).catch((e) => e);
+    const error = await subs.subscribe(eventA).catch((rejection) => rejection);
     expect(error).toBeInstanceOf(SubscriptionError);
     expect(error.code).toBe(SUBSCRIPTION_ERROR.eventEnded);
     expect(repo.createSubscription).not.toHaveBeenCalled();

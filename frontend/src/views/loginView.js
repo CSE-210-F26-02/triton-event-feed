@@ -2,7 +2,7 @@
  * Login dialog (Bluesky handle + app password).
  * @module views/loginView
  */
-import { closeDialog, h, openDialog } from "../dom.js";
+import { closeDialog, createElementTree, openDialog } from "../dom.js";
 
 /**
  * @typedef {object} LoginRequest
@@ -18,27 +18,30 @@ import { closeDialog, h, openDialog } from "../dom.js";
  * @returns {{open(request?: LoginRequest): void, element: HTMLDialogElement}}
  */
 export function createLoginView({ login, onLoggedIn }) {
-  const dialog = h("dialog", {
+  const dialog = createElementTree("dialog", {
     class: "dialog",
     "aria-labelledby": "login-title",
   });
 
   /** @param {LoginRequest} [request] */
   function open({ reason, onLoggedIn: afterThisLogin } = {}) {
-    const status = h("p", { class: "form-status", role: "status" });
-    const submit = h(
+    const status = createElementTree("p", {
+      class: "form-status",
+      role: "status",
+    });
+    const submit = createElementTree(
       "button",
       { type: "submit", class: "btn btn--gold" },
       "Log in",
     );
-    const form = h(
+    const form = createElementTree(
       "form",
       { class: "compose" },
-      h(
+      createElementTree(
         "div",
         { class: "field" },
-        h("label", { for: "l-id" }, "Bluesky handle"),
-        h("input", {
+        createElementTree("label", { for: "l-id" }, "Bluesky handle"),
+        createElementTree("input", {
           id: "l-id",
           name: "identifier",
           required: true,
@@ -47,16 +50,16 @@ export function createLoginView({ login, onLoggedIn }) {
           placeholder: "you.bsky.social",
         }),
       ),
-      h(
+      createElementTree(
         "div",
         { class: "field" },
-        h("label", { for: "l-pw" }, "App password"),
-        h(
+        createElementTree("label", { for: "l-pw" }, "App password"),
+        createElementTree(
           "p",
           { class: "hint", id: "l-pw-hint" },
           "Create one in Bluesky → Settings → Privacy and security → App passwords. Never use your main password.",
         ),
-        h("input", {
+        createElementTree("input", {
           id: "l-pw",
           name: "password",
           type: "password",
@@ -66,19 +69,19 @@ export function createLoginView({ login, onLoggedIn }) {
         }),
       ),
       status,
-      h(
+      createElementTree(
         "div",
         { class: "card__actions" },
         submit,
-        h(
+        createElementTree(
           "button",
           { type: "button", class: "btn", onclick: () => closeDialog(dialog) },
           "Cancel",
         ),
       ),
     );
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
+    form.addEventListener("submit", async (submitEvent) => {
+      submitEvent.preventDefault();
       submit.disabled = true;
       status.textContent = "Logging in…";
       try {
@@ -86,8 +89,8 @@ export function createLoginView({ login, onLoggedIn }) {
           form.elements.identifier.value,
           form.elements.password.value,
         );
-      } catch (err) {
-        status.textContent = `Login failed: ${err.message}`;
+      } catch (error) {
+        status.textContent = `Login failed: ${error.message}`;
         return;
       } finally {
         submit.disabled = false;
@@ -97,8 +100,9 @@ export function createLoginView({ login, onLoggedIn }) {
       await afterThisLogin?.();
     });
     dialog.replaceChildren(
-      h("h2", { id: "login-title" }, "Log in with Bluesky"),
-      reason && h("p", { class: "hint", id: "login-reason" }, reason),
+      createElementTree("h2", { id: "login-title" }, "Log in with Bluesky"),
+      reason &&
+        createElementTree("p", { class: "hint", id: "login-reason" }, reason),
       form,
     );
     openDialog(dialog);

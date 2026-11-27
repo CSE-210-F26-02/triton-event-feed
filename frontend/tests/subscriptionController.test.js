@@ -22,7 +22,7 @@ function setup({ loggedIn = true, subscribed = false } = {}) {
     unsubscribe: vi.fn(async () => (state.subscribed = false)),
     toggle: vi.fn(async () => (state.subscribed = !state.subscribed)),
   };
-  const deps = {
+  const dependencies = {
     subscriptions,
     notifications: { askPermissionOnce: vi.fn(async () => {}) },
     toast: vi.fn(),
@@ -30,7 +30,11 @@ function setup({ loggedIn = true, subscribed = false } = {}) {
     requestLogin: vi.fn(),
     openEvent: vi.fn(),
   };
-  return { state, deps, controller: createSubscriptionController(deps) };
+  return {
+    state,
+    deps: dependencies,
+    controller: createSubscriptionController(dependencies),
+  };
 }
 
 describe("subscriptionErrorMessage", () => {
@@ -49,87 +53,107 @@ describe("subscriptionErrorMessage", () => {
 
 describe("createSubscriptionController", () => {
   it("toggles when logged in and toasts the result", async () => {
-    const { controller, deps } = setup();
+    const { controller, deps: dependencies } = setup();
     await expect(controller.toggle(EVENT)).resolves.toBe(true);
-    expect(deps.subscriptions.toggle).toHaveBeenCalledWith(EVENT);
-    expect(deps.toast).toHaveBeenCalledWith(SUBSCRIBED_TOAST);
-    expect(deps.notifications.askPermissionOnce).toHaveBeenCalled();
+    expect(dependencies.subscriptions.toggle).toHaveBeenCalledWith(EVENT);
+    expect(dependencies.toast).toHaveBeenCalledWith(SUBSCRIBED_TOAST);
+    expect(dependencies.notifications.askPermissionOnce).toHaveBeenCalled();
     await expect(controller.toggle(EVENT)).resolves.toBe(false);
-    expect(deps.toast).toHaveBeenLastCalledWith(UNSUBSCRIBED_TOAST);
+    expect(dependencies.toast).toHaveBeenLastCalledWith(UNSUBSCRIBED_TOAST);
   });
 
   it("toasts errors and resolves to null", async () => {
-    const { controller, deps } = setup();
-    deps.subscriptions.toggle.mockRejectedValueOnce(new Error("offline"));
+    const { controller, deps: dependencies } = setup();
+    dependencies.subscriptions.toggle.mockRejectedValueOnce(
+      new Error("offline"),
+    );
     await expect(controller.toggle(EVENT)).resolves.toBeNull();
-    expect(deps.toast).toHaveBeenCalledWith(NETWORK_FAILED_TOAST, {
+    expect(dependencies.toast).toHaveBeenCalledWith(NETWORK_FAILED_TOAST, {
       kind: "error",
     });
   });
 
   it("asks a logged-out user to log in, and changes nothing yet", async () => {
-    const { controller, deps } = setup({ loggedIn: false });
+    const { controller, deps: dependencies } = setup({ loggedIn: false });
     await expect(controller.toggle(EVENT)).resolves.toBeNull();
-    expect(deps.requestLogin).toHaveBeenCalledWith({
+    expect(dependencies.requestLogin).toHaveBeenCalledWith({
       reason: LOGIN_TO_SUBSCRIBE_REASON,
       onLoggedIn: expect.any(Function),
     });
-    expect(deps.subscriptions.toggle).not.toHaveBeenCalled();
+    expect(dependencies.subscriptions.toggle).not.toHaveBeenCalled();
   });
 
   it("after login: returns to the event, reloads, then subscribes", async () => {
-    const { controller, deps, state } = setup({ loggedIn: false });
+    const {
+      controller,
+      deps: dependencies,
+      state,
+    } = setup({ loggedIn: false });
     await controller.toggle(EVENT);
     state.loggedIn = true;
-    await deps.requestLogin.mock.calls[0][0].onLoggedIn();
-    expect(deps.openEvent).toHaveBeenCalledWith(EVENT.uri);
-    expect(deps.subscriptions.load).toHaveBeenCalled();
-    expect(deps.subscriptions.subscribe).toHaveBeenCalledWith(EVENT);
+    await dependencies.requestLogin.mock.calls[0][0].onLoggedIn();
+    expect(dependencies.openEvent).toHaveBeenCalledWith(EVENT.uri);
+    expect(dependencies.subscriptions.load).toHaveBeenCalled();
+    expect(dependencies.subscriptions.subscribe).toHaveBeenCalledWith(EVENT);
   });
 
   it("after login: never unsubscribes someone already subscribed elsewhere", async () => {
-    const { controller, deps, state } = setup({ loggedIn: false });
+    const {
+      controller,
+      deps: dependencies,
+      state,
+    } = setup({ loggedIn: false });
     await controller.toggle(EVENT);
     state.loggedIn = true;
     state.subscribed = true; // e.g. subscribed from their phone earlier
-    await deps.requestLogin.mock.calls[0][0].onLoggedIn();
-    expect(deps.subscriptions.subscribe).not.toHaveBeenCalled();
-    expect(deps.subscriptions.unsubscribe).not.toHaveBeenCalled();
-    expect(deps.subscriptions.toggle).not.toHaveBeenCalled();
+    await dependencies.requestLogin.mock.calls[0][0].onLoggedIn();
+    expect(dependencies.subscriptions.subscribe).not.toHaveBeenCalled();
+    expect(dependencies.subscriptions.unsubscribe).not.toHaveBeenCalled();
+    expect(dependencies.subscriptions.toggle).not.toHaveBeenCalled();
   });
 
   it("after login: stops if the subscriptions can't be loaded", async () => {
-    const { controller, deps, state } = setup({ loggedIn: false });
+    const {
+      controller,
+      deps: dependencies,
+      state,
+    } = setup({ loggedIn: false });
     await controller.toggle(EVENT);
     state.loggedIn = true;
-    deps.subscriptions.load.mockRejectedValueOnce(new Error("offline"));
-    await deps.requestLogin.mock.calls[0][0].onLoggedIn();
-    expect(deps.toast).toHaveBeenCalledWith(LOAD_FAILED_TOAST, {
+    dependencies.subscriptions.load.mockRejectedValueOnce(new Error("offline"));
+    await dependencies.requestLogin.mock.calls[0][0].onLoggedIn();
+    expect(dependencies.toast).toHaveBeenCalledWith(LOAD_FAILED_TOAST, {
       kind: "error",
     });
-    expect(deps.subscriptions.subscribe).not.toHaveBeenCalled();
+    expect(dependencies.subscriptions.subscribe).not.toHaveBeenCalled();
   });
 
   it("reload() resolves to whether loading worked", async () => {
-    const { controller, deps } = setup();
+    const { controller, deps: dependencies } = setup();
     await expect(controller.reload()).resolves.toBe(true);
-    deps.subscriptions.load.mockRejectedValueOnce(new Error("offline"));
+    dependencies.subscriptions.load.mockRejectedValueOnce(new Error("offline"));
     await expect(controller.reload()).resolves.toBe(false);
   });
 
   it("unsubscribe(uri) works by URI, and is a no-op when logged out", async () => {
-    const { controller, deps, state } = setup({ subscribed: true });
+    const {
+      controller,
+      deps: dependencies,
+      state,
+    } = setup({ subscribed: true });
     await expect(controller.unsubscribe(EVENT.uri)).resolves.toBe(false);
-    expect(deps.subscriptions.unsubscribe).toHaveBeenCalledWith(EVENT.uri);
+    expect(dependencies.subscriptions.unsubscribe).toHaveBeenCalledWith(
+      EVENT.uri,
+    );
     state.loggedIn = false;
     await expect(controller.unsubscribe(EVENT.uri)).resolves.toBeNull();
-    expect(deps.subscriptions.unsubscribe).toHaveBeenCalledTimes(1);
+    expect(dependencies.subscriptions.unsubscribe).toHaveBeenCalledTimes(1);
   });
 
   it("works without a notifications client", async () => {
-    const { deps } = setup();
+    const { deps: dependencies } = setup();
     const controller = createSubscriptionController({
-      ...deps,
+      ...dependencies,
       notifications: undefined,
     });
     await expect(controller.toggle(EVENT)).resolves.toBe(true);

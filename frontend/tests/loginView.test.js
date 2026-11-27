@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createLoginView } from "../src/views/loginView.js";
 
-const flush = () => new Promise((r) => setTimeout(r, 0));
+const flush = () => new Promise((resolveFlush) => setTimeout(resolveFlush, 0));
 
 /** Fill in and submit the dialog's form. */
 async function submit(dialog, id = "alice.test", password = "pw") {
@@ -56,11 +56,11 @@ describe("loginView", () => {
   });
 
   it("forgets a previous open's callback when reopened", async () => {
-    const first = vi.fn();
+    const firstCallback = vi.fn();
     const view = createLoginView({ login: vi.fn(async () => {}) });
-    view.open({ onLoggedIn: first });
+    view.open({ onLoggedIn: firstCallback });
     view.open(); // e.g. cancelled, then opened from the header
     await submit(view.element);
-    expect(first).not.toHaveBeenCalled();
+    expect(firstCallback).not.toHaveBeenCalled();
   });
 });

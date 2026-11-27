@@ -10,7 +10,7 @@
  * - Only the XRPC calls the app makes are implemented.
  * @module stubs/mockPds
  */
-import { generateTid } from "../devWriter.js";
+import { generateTimestampRecordKey } from "../devWriter.js";
 import { getStorage, storageGet, storageSet } from "../util.js";
 
 /** Origin of the fake PDS (never contacted: every request is answered in-page). */
@@ -47,25 +47,26 @@ export function createTokenIssuer(prefixes) {
     throw new TypeError(
       "Mock PDS needs accessTokenPrefix and refreshTokenPrefix (see loadMockConfig)",
     );
-  const bearer = (init) => {
-    const header = init?.headers?.Authorization;
+  const bearer = (requestInit) => {
+    const header = requestInit?.headers?.Authorization;
     return typeof header === "string" && header.startsWith(BEARER_PREFIX)
       ? header.slice(BEARER_PREFIX.length)
       : null;
   };
   return {
     /** Tokens for a new or refreshed session. */
-    sessionFor: (did) => ({
-      did,
-      accessJwt: `${accessTokenPrefix}${did}`,
-      refreshJwt: `${refreshTokenPrefix}${did}`,
+    sessionFor: (accountDid) => ({
+      did: accountDid,
+      accessJwt: `${accessTokenPrefix}${accountDid}`,
+      refreshJwt: `${refreshTokenPrefix}${accountDid}`,
     }),
     /** True when the request carries the access token for `did`. */
-    isAccessFor: (init, did) =>
-      Boolean(did) && bearer(init) === `${accessTokenPrefix}${did}`,
+    isAccessFor: (requestInit, repoDid) =>
+      Boolean(repoDid) &&
+      bearer(requestInit) === `${accessTokenPrefix}${repoDid}`,
     /** DID inside a refresh token, or null when it is not one of ours. */
-    didFromRefresh(init) {
-      const token = bearer(init);
+    didFromRefresh(requestInit) {
+      const token = bearer(requestInit);
       if (!token?.startsWith(refreshTokenPrefix)) return null;
       return token.slice(refreshTokenPrefix.length) || null;
     },
@@ -88,7 +89,7 @@ const xrpcError = (status, error, message) =>
   respond({ error, message }, status);
 
 /**
- * Read / write the persisted repos: {[did]: {[collection]: {[rkey]: {cid, value}}}}.
+ * Read / write the persisted repos: {[repoDid]: {[collection]: {[recordKey]: {cid, value}}}}.
  * @param {Storage|null} storage
  */
 function createRepoStore(storage) {
@@ -102,19 +103,19 @@ function createRepoStore(storage) {
   const write = (repos) =>
     storageSet(storage, MOCK_PDS_STORAGE_KEY, JSON.stringify(repos));
   return {
-    collection(did, collection) {
-      return read()[did]?.[collection] ?? {};
+    collection(repoDid, collection) {
+      return read()[repoDid]?.[collection] ?? {};
     },
-    put(did, collection, rkey, entry) {
+    put(repoDid, collection, recordKey, entry) {
       const repos = read();
-      repos[did] ??= {};
-      repos[did][collection] ??= {};
-      repos[did][collection][rkey] = entry;
+      repos[repoDid] ??= {};
+      repos[repoDid][collection] ??= {};
+      repos[repoDid][collection][recordKey] = entry;
       write(repos);
     },
-    remove(did, collection, rkey) {
+    remove(repoDid, collection, recordKey) {
       const repos = read();
-      delete repos[did]?.[collection]?.[rkey];
+      delete repos[repoDid]?.[collection]?.[recordKey];
       write(repos);
     },
   };
@@ -122,12 +123,12 @@ function createRepoStore(storage) {
 
 /**
  * Parse a request body as JSON (empty object when absent or malformed).
- * @param {RequestInit} [init]
+ * @param {RequestInit} [requestInit]
  * @returns {object}
  */
-function bodyOf(init) {
+function bodyOf(requestInit) {
   try {
-    return JSON.parse(init?.body || "{}");
+    return JSON.parse(requestInit?.body || "{}");
   } catch {
     return {};
   }
@@ -140,8 +141,8 @@ function bodyOf(init) {
  */
 function sessionHandlers(tokens) {
   return {
-    "com.atproto.server.createSession": (_url, init) => {
-      const { identifier, password } = bodyOf(init);
+    "com.atproto.server.createSession": (_url, requestInit) => {
+      const { identifier, password } = bodyOf(requestInit);
       if (!identifier || !password)
         return xrpcError(401, "AuthenticationRequired", "Invalid password");
       const handle = String(identifier).replace(/^@/, "");
@@ -150,11 +151,12 @@ function sessionHandlers(tokens) {
         handle,
       });
     },
-    "com.atproto.server.refreshSession": (_url, init) => {
-      const did = tokens.didFromRefresh(init);
-      if (!did) return xrpcError(401, "InvalidToken", "Bad refresh token");
+    "com.atproto.server.refreshSession": (_url, requestInit) => {
+      const refreshedDid = tokens.didFromRefresh(requestInit);
+      if (!refreshedDid)
+        return xrpcError(401, "InvalidToken", "Bad refresh token");
       // No handle in the reply: the client keeps the one it has.
-      return respond(tokens.sessionFor(did));
+      return respond(tokens.sessionFor(refreshedDid));
     },
     "com.atproto.server.deleteSession": () => respond({}),
   };
@@ -167,11 +169,16 @@ function sessionHandlers(tokens) {
  * @returns {Record<string, (url: URL, init?: RequestInit) => Response>}
  */
 function repoHandlers(store, tokens) {
-  const write = (init, rkeyOf) => {
-    const { repo, collection, record, rkey } = bodyOf(init);
-    if (!tokens.isAccessFor(init, repo))
+  const write = (requestInit, chooseRecordKey) => {
+    const {
+      repo,
+      collection,
+      record,
+      rkey: requestedRecordKey,
+    } = bodyOf(requestInit);
+    if (!tokens.isAccessFor(requestInit, repo))
       return xrpcError(401, "AuthenticationRequired", "Bad token");
-    const key = rkeyOf(rkey);
+    const key = chooseRecordKey(requestedRecordKey);
     store.put(repo, collection, key, { cid: MOCK_RECORD_CID, value: record });
     return respond({
       uri: `at://${repo}/${collection}/${key}`,
@@ -179,14 +186,15 @@ function repoHandlers(store, tokens) {
     });
   };
   return {
-    "com.atproto.repo.createRecord": (_url, init) =>
-      write(init, () => generateTid()),
-    "com.atproto.repo.putRecord": (_url, init) => write(init, (rkey) => rkey),
-    "com.atproto.repo.deleteRecord": (_url, init) => {
-      const { repo, collection, rkey } = bodyOf(init);
-      if (!tokens.isAccessFor(init, repo))
+    "com.atproto.repo.createRecord": (_url, requestInit) =>
+      write(requestInit, () => generateTimestampRecordKey()),
+    "com.atproto.repo.putRecord": (_url, requestInit) =>
+      write(requestInit, (requestedRecordKey) => requestedRecordKey),
+    "com.atproto.repo.deleteRecord": (_url, requestInit) => {
+      const { repo, collection, rkey: recordKey } = bodyOf(requestInit);
+      if (!tokens.isAccessFor(requestInit, repo))
         return xrpcError(401, "AuthenticationRequired", "Bad token");
-      store.remove(repo, collection, rkey);
+      store.remove(repo, collection, recordKey);
       return respond({});
     },
     "com.atproto.repo.listRecords": (url) => listRecords(store, url),
@@ -204,16 +212,17 @@ function listRecords(store, url) {
   const collection = url.searchParams.get("collection");
   const limit = Number(url.searchParams.get("limit")) || DEFAULT_LIST_LIMIT;
   const offset = Number(url.searchParams.get("cursor")) || 0;
-  const all = Object.entries(store.collection(repo, collection)).map(
-    ([rkey, entry]) => ({
-      uri: `at://${repo}/${collection}/${rkey}`,
+  const allRecords = Object.entries(store.collection(repo, collection)).map(
+    ([recordKey, entry]) => ({
+      uri: `at://${repo}/${collection}/${recordKey}`,
       cid: entry.cid,
       value: entry.value,
     }),
   );
-  const records = all.slice(offset, offset + limit);
-  const next = offset + limit < all.length ? String(offset + limit) : undefined;
-  return respond({ records, cursor: next });
+  const records = allRecords.slice(offset, offset + limit);
+  const nextCursor =
+    offset + limit < allRecords.length ? String(offset + limit) : undefined;
+  return respond({ records, cursor: nextCursor });
 }
 
 /**
@@ -225,9 +234,9 @@ function resolveIdentity(url) {
   if (url.pathname.endsWith("/com.atproto.identity.resolveHandle"))
     return respond({ did: mockDidForHandle(url.searchParams.get("handle")) });
   if (url.hostname === "plc.directory") {
-    const did = decodeURIComponent(url.pathname.slice(1));
+    const requestedDid = decodeURIComponent(url.pathname.slice(1));
     return respond({
-      id: did,
+      id: requestedDid,
       service: [
         {
           id: "#atproto_pds",
@@ -256,14 +265,15 @@ export function createMockPdsFetch({
     ...sessionHandlers(issuer),
     ...repoHandlers(createRepoStore(storage), issuer),
   };
-  return async (url, init) => {
+  return async (url, requestInit) => {
     const parsed = new URL(url);
     const identity = resolveIdentity(parsed);
     if (identity) return identity;
-    const nsid = parsed.pathname.replace(/^\/xrpc\//, "");
-    const handler = parsed.origin === MOCK_PDS_ORIGIN ? handlers[nsid] : null;
+    const xrpcMethod = parsed.pathname.replace(/^\/xrpc\//, "");
+    const handler =
+      parsed.origin === MOCK_PDS_ORIGIN ? handlers[xrpcMethod] : null;
     return handler
-      ? handler(parsed, init)
-      : xrpcError(404, "MethodNotImplemented", `Mock PDS: ${nsid}`);
+      ? handler(parsed, requestInit)
+      : xrpcError(404, "MethodNotImplemented", `Mock PDS: ${xrpcMethod}`);
   };
 }

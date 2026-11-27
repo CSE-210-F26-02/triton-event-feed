@@ -8,18 +8,18 @@ import { coordsOf, dayKey } from "./filters.js";
  * Format a start–end window, e.g. "3:00 PM – 5:00 PM" or with dates when multi-day.
  * @param {string} startsAt ISO
  * @param {string} endsAt ISO
- * @param {{locale?: string, timeZone?: string}} [opts]
+ * @param {{locale?: string, timeZone?: string}} [options]
  * @returns {string}
  */
 export function formatTimeWindow(startsAt, endsAt, { locale, timeZone } = {}) {
-  const s = new Date(startsAt);
-  const e = new Date(endsAt);
-  const time = new Intl.DateTimeFormat(locale, {
+  const start = new Date(startsAt);
+  const end = new Date(endsAt);
+  const timeFormatter = new Intl.DateTimeFormat(locale, {
     hour: "numeric",
     minute: "2-digit",
     timeZone,
   });
-  const full = new Intl.DateTimeFormat(locale, {
+  const dateTimeFormatter = new Intl.DateTimeFormat(locale, {
     weekday: "short",
     month: "short",
     day: "numeric",
@@ -28,36 +28,39 @@ export function formatTimeWindow(startsAt, endsAt, { locale, timeZone } = {}) {
     timeZone,
   });
   const sameDay = timeZone
-    ? sameDayInZone(s, e, timeZone)
-    : dayKey(s) === dayKey(e);
+    ? sameDayInZone(start, end, timeZone)
+    : dayKey(start) === dayKey(end);
   return sameDay
-    ? `${time.format(s)} – ${time.format(e)}`
-    : `${full.format(s)} – ${full.format(e)}`;
+    ? `${timeFormatter.format(start)} – ${timeFormatter.format(end)}`
+    : `${dateTimeFormatter.format(start)} – ${dateTimeFormatter.format(end)}`;
 }
 
-function sameDayInZone(a, b, timeZone) {
-  const f = new Intl.DateTimeFormat("en-CA", {
+function sameDayInZone(firstDate, secondDate, timeZone) {
+  const calendarDayFormatter = new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
   });
-  return f.format(a) === f.format(b);
+  return (
+    calendarDayFormatter.format(firstDate) ===
+    calendarDayFormatter.format(secondDate)
+  );
 }
 
 /**
  * Format a single timestamp (e.g. for announcements).
- * @param {string} iso @param {{locale?: string, timeZone?: string}} [opts]
+ * @param {string} isoDateTime @param {{locale?: string, timeZone?: string}} [options]
  * @returns {string}
  */
-export function formatDateTime(iso, { locale, timeZone } = {}) {
+export function formatDateTime(isoDateTime, { locale, timeZone } = {}) {
   return new Intl.DateTimeFormat(locale, {
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
     timeZone,
-  }).format(new Date(iso));
+  }).format(new Date(isoDateTime));
 }
 
 /**
@@ -66,12 +69,12 @@ export function formatDateTime(iso, { locale, timeZone } = {}) {
  * @returns {string|null}
  */
 export function osmUrl(event) {
-  const c = coordsOf(event);
-  if (c)
-    return `https://www.openstreetmap.org/?mlat=${c.lat}&mlon=${c.lng}#map=18/${c.lat}/${c.lng}`;
-  const addr = event?.location?.address;
-  return addr
-    ? `https://www.openstreetmap.org/search?query=${encodeURIComponent(addr)}`
+  const coordinates = coordsOf(event);
+  if (coordinates)
+    return `https://www.openstreetmap.org/?mlat=${coordinates.lat}&mlon=${coordinates.lng}#map=18/${coordinates.lat}/${coordinates.lng}`;
+  const address = event?.location?.address;
+  return address
+    ? `https://www.openstreetmap.org/search?query=${encodeURIComponent(address)}`
     : null;
 }
 
@@ -86,14 +89,14 @@ export function statusLabel(status) {
 
 /**
  * Format a distance for display.
- * @param {number|null|undefined} km
+ * @param {number|null|undefined} distanceKm
  * @returns {string|null}
  */
-export function formatDistance(km) {
-  if (km == null) return null;
-  return km < 1
-    ? `${Math.round(km * 1000)} m away`
-    : `${km.toFixed(1)} km away`;
+export function formatDistance(distanceKm) {
+  if (distanceKm == null) return null;
+  return distanceKm < 1
+    ? `${Math.round(distanceKm * 1000)} m away`
+    : `${distanceKm.toFixed(1)} km away`;
 }
 
 /**
@@ -101,7 +104,7 @@ export function formatDistance(km) {
  * e.g. "Wednesday, November 11, 2026 · 7:00 PM – 9:00 PM UTC".
  * @param {string} startsAt ISO
  * @param {string} endsAt ISO
- * @param {{locale?: string, timeZone?: string}} [opts]
+ * @param {{locale?: string, timeZone?: string}} [options]
  * @returns {string}
  */
 export function formatEventWhen(startsAt, endsAt, { locale, timeZone } = {}) {
@@ -116,30 +119,30 @@ export function formatEventWhen(startsAt, endsAt, { locale, timeZone } = {}) {
   };
   const timeOptions = { hour: "numeric", minute: "2-digit", timeZone };
   const date = new Intl.DateTimeFormat(locale, dateOptions);
-  const time = new Intl.DateTimeFormat(locale, timeOptions);
+  const timeFormatter = new Intl.DateTimeFormat(locale, timeOptions);
   const timeWithZone = new Intl.DateTimeFormat(locale, {
     ...timeOptions,
     timeZoneName: "short",
   });
   const sameDay = date.format(start) === date.format(end);
   return sameDay
-    ? `${date.format(start)} · ${time.format(start)} – ${timeWithZone.format(end)}`
-    : `${date.format(start)}, ${time.format(start)} – ${date.format(end)}, ${timeWithZone.format(end)}`;
+    ? `${date.format(start)} · ${timeFormatter.format(start)} – ${timeWithZone.format(end)}`
+    : `${date.format(start)}, ${timeFormatter.format(start)} – ${date.format(end)}, ${timeWithZone.format(end)}`;
 }
 
 /**
  * Bluesky profile URL for a handle (preferred) or DID, or null when neither is usable.
  * @param {string} [handle] e.g. "alice.bsky.social"
- * @param {string} [did] e.g. "did:plc:abc"
+ * @param {string} [authorDid] e.g. "did:plc:abc"
  * @returns {string|null}
  */
-export function blueskyProfileUrl(handle, did) {
+export function blueskyProfileUrl(handle, authorDid) {
   const looksLikeHandle = (value) =>
     typeof value === "string" && /^[a-z0-9.-]+\.[a-z0-9-]+$/i.test(value);
   const actor = looksLikeHandle(handle)
     ? handle
-    : did?.startsWith("did:")
-      ? did
+    : authorDid?.startsWith("did:")
+      ? authorDid
       : null;
   return actor
     ? `https://bsky.app/profile/${encodeURIComponent(actor).replace(/%3A/gi, ":")}`

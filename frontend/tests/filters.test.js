@@ -19,19 +19,24 @@ describe("buildEventQuery", () => {
     });
   });
 
-  it("includes tags (repeatable), group, trimmed q and cursor", () => {
-    const p = buildEventQuery(
-      { tags: ["food", "music"], group: "ACM", q: "  tacos ", nearMe: false },
+  it("includes tags (repeatable), group, trimmed search text (sent as q) and cursor", () => {
+    const params = buildEventQuery(
+      {
+        tags: ["food", "music"],
+        group: "ACM",
+        searchText: "  tacos ",
+        nearMe: false,
+      },
       { cursor: "c1", limit: 5 },
     );
-    expect(p).toEqual({
+    expect(params).toEqual({
       limit: 5,
       tag: ["food", "music"],
       group: "ACM",
       q: "tacos",
       cursor: "c1",
     });
-    expect(toQueryString(p)).toBe(
+    expect(toQueryString(params)).toBe(
       "?limit=5&tag=food&tag=music&group=ACM&q=tacos&cursor=c1",
     );
   });
@@ -47,9 +52,9 @@ describe("distance", () => {
     const geisel = { lat: 32.8811, lng: -117.2376 };
     expect(haversineKm(geisel, geisel)).toBe(0);
     // UCSD -> downtown San Diego is ~ 18 km
-    const d = haversineKm(geisel, { lat: 32.7157, lng: -117.1611 });
-    expect(d).toBeGreaterThan(17);
-    expect(d).toBeLessThan(21);
+    const distanceKm = haversineKm(geisel, { lat: 32.7157, lng: -117.1611 });
+    expect(distanceKm).toBeGreaterThan(17);
+    expect(distanceKm).toBeLessThan(21);
   });
 
   it("coordsOf parses strings and rejects junk", () => {
@@ -63,31 +68,39 @@ describe("distance", () => {
   });
 
   it("sorts nearest first; no-coords last, stable, annotated", () => {
-    const me = { lat: 32.88, lng: -117.23 };
+    const myLocation = { lat: 32.88, lng: -117.23 };
     const far = { uri: "far", location: { lat: "32.70", lng: "-117.16" } };
     const near = { uri: "near", location: { lat: "32.881", lng: "-117.231" } };
     const none1 = { uri: "none1", location: { name: "x" } };
     const none2 = { uri: "none2", location: { name: "y" } };
-    const out = sortByDistance([none1, far, none2, near], me);
-    expect(out.map((e) => e.uri)).toEqual(["near", "far", "none1", "none2"]);
-    expect(out[0].distanceKm).toBeLessThan(1);
-    expect(out[2].distanceKm).toBeNull();
+    const sortedEvents = sortByDistance([none1, far, none2, near], myLocation);
+    expect(sortedEvents.map((event) => event.uri)).toEqual([
+      "near",
+      "far",
+      "none1",
+      "none2",
+    ]);
+    expect(sortedEvents[0].distanceKm).toBeLessThan(1);
+    expect(sortedEvents[2].distanceKm).toBeNull();
   });
 });
 
 describe("groupByDay", () => {
   const now = new Date(2026, 10, 11, 12, 0); // Wed Nov 11 2026 local
-  const at = (d, h) => ({
-    startsAt: new Date(2026, 10, d, h).toISOString(),
-    uri: `${d}-${h}`,
+  const localTime = (day, hour) => ({
+    startsAt: new Date(2026, 10, day, hour).toISOString(),
+    uri: `${day}-${hour}`,
   });
 
   it("labels Today, Tomorrow, weekday, then date; chronological groups", () => {
-    const groups = groupByDay([at(20, 9), at(13, 9), at(12, 9), at(11, 18)], {
-      now,
-      locale: "en-US",
-    });
-    expect(groups.map((g) => g.label)).toEqual([
+    const groups = groupByDay(
+      [localTime(20, 9), localTime(13, 9), localTime(12, 9), localTime(11, 18)],
+      {
+        now,
+        locale: "en-US",
+      },
+    );
+    expect(groups.map((group) => group.label)).toEqual([
       "Today",
       "Tomorrow",
       "Friday",
@@ -96,13 +109,16 @@ describe("groupByDay", () => {
   });
 
   it("puts in-progress events (started earlier) under Today, keeps order within a group", () => {
-    const groups = groupByDay([at(11, 15), at(10, 20), at(11, 13)], {
-      now,
-      locale: "en-US",
-    });
+    const groups = groupByDay(
+      [localTime(11, 15), localTime(10, 20), localTime(11, 13)],
+      {
+        now,
+        locale: "en-US",
+      },
+    );
     expect(groups).toHaveLength(1);
     expect(groups[0].label).toBe("Today");
-    expect(groups[0].events.map((e) => e.uri)).toEqual([
+    expect(groups[0].events.map((event) => event.uri)).toEqual([
       "11-15",
       "10-20",
       "11-13",

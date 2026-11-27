@@ -170,7 +170,7 @@ export function describeGroup(group) {
   }
   if (!isPlainObject(group) || typeof group.uri !== "string") return null;
   const parsed = parseAtUri(group.uri);
-  return parsed ? { label: parsed.rkey, uri: group.uri } : null;
+  return parsed ? { label: parsed.recordKey, uri: group.uri } : null;
 }
 
 /**
@@ -189,12 +189,12 @@ function sanitizeTags(tags) {
  * @returns {DisplayLocation}
  */
 function sanitizeLocation(location) {
-  const source = isPlainObject(location) ? location : {};
+  const safeLocation = isPlainObject(location) ? location : {};
   return {
-    name: stringOrEmpty(source.name).trim(),
-    address: stringOrEmpty(source.address).trim(),
-    lat: stringOrNull(source.lat),
-    lng: stringOrNull(source.lng),
+    name: stringOrEmpty(safeLocation.name).trim(),
+    address: stringOrEmpty(safeLocation.address).trim(),
+    lat: stringOrNull(safeLocation.lat),
+    lng: stringOrNull(safeLocation.lng),
   };
 }
 
@@ -219,23 +219,23 @@ function sanitizeUpdates(updates) {
  * @returns {DisplayEvent}
  */
 export function toDisplayEvent(eventView) {
-  const source = isPlainObject(eventView) ? eventView : {};
+  const safeEventView = isPlainObject(eventView) ? eventView : {};
   return {
-    uri: stringOrNull(source.uri),
-    name: stringOrEmpty(source.name).trim() || UNTITLED_EVENT_NAME,
-    description: stringOrEmpty(source.description),
-    startsAt: parseableDateOrNull(source.startsAt),
-    endsAt: parseableDateOrNull(source.endsAt),
-    location: sanitizeLocation(source.location),
-    tags: sanitizeTags(source.tags),
-    group: describeGroup(source.group),
-    authorDid: stringOrNull(source.authorDid),
-    authorHandle: stringOrNull(source.authorHandle),
-    status: stringOrNull(source.status),
-    indexedAt: parseableDateOrNull(source.indexedAt),
-    updatedAt: parseableDateOrNull(source.updatedAt),
-    sourceUrl: stringOrNull(source.sourceUrl),
-    updates: sanitizeUpdates(source.updates),
+    uri: stringOrNull(safeEventView.uri),
+    name: stringOrEmpty(safeEventView.name).trim() || UNTITLED_EVENT_NAME,
+    description: stringOrEmpty(safeEventView.description),
+    startsAt: parseableDateOrNull(safeEventView.startsAt),
+    endsAt: parseableDateOrNull(safeEventView.endsAt),
+    location: sanitizeLocation(safeEventView.location),
+    tags: sanitizeTags(safeEventView.tags),
+    group: describeGroup(safeEventView.group),
+    authorDid: stringOrNull(safeEventView.authorDid),
+    authorHandle: stringOrNull(safeEventView.authorHandle),
+    status: stringOrNull(safeEventView.status),
+    indexedAt: parseableDateOrNull(safeEventView.indexedAt),
+    updatedAt: parseableDateOrNull(safeEventView.updatedAt),
+    sourceUrl: stringOrNull(safeEventView.sourceUrl),
+    updates: sanitizeUpdates(safeEventView.updates),
     issues: findLexiconIssues(eventView),
   };
 }

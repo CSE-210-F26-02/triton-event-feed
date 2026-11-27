@@ -17,7 +17,7 @@ const GROUP_NSID = "app.communitymap.group";
  * fixtures/event/valid/full.json. The mock never resolves it.
  */
 const MOCK_CID = "bafyreihooyosut5ztb3xty23uwoyij5ovnqr5qldanntxmah33quatfwoy";
-const DEMO_DID_KEY = "cm:demo-did"; // same key devWriter uses, so you "own" one event
+const DEMO_DID_STORAGE_KEY = "cm:demo-did"; // same key devWriter uses, so you "own" one event
 
 /**
  * ISO timestamp `hours` from now (negative = in the past).
@@ -33,36 +33,37 @@ const hoursFromNow = (hours) =>
  */
 function demoDid() {
   const storage = getStorage("localStorage");
-  let did = storageGet(storage, DEMO_DID_KEY);
-  if (!did) {
-    did = "did:plc:demo-mockhost0000";
-    storageSet(storage, DEMO_DID_KEY, did);
+  let storedDid = storageGet(storage, DEMO_DID_STORAGE_KEY);
+  if (!storedDid) {
+    storedDid = "did:plc:demo-mockhost0000";
+    storageSet(storage, DEMO_DID_STORAGE_KEY, storedDid);
   }
-  return did;
+  return storedDid;
 }
 
 /**
  * Build a com.atproto.repo.strongRef to a mock group record, matching the lexicon's
  * `group` field.
- * @param {string} did DID of the group's owner
- * @param {string} rkey record key of the group (shown as the placeholder label, see #17)
+ * @param {string} ownerDid DID of the group's owner
+ * @param {string} groupRecordKey record key of the group (shown as the placeholder label, see #17)
  * @returns {{uri: string, cid: string}}
  */
-const mockGroupRef = (did, rkey) => ({
-  uri: `at://${did}/${GROUP_NSID}/${rkey}`,
+const mockGroupRef = (ownerDid, groupRecordKey) => ({
+  uri: `at://${ownerDid}/${GROUP_NSID}/${groupRecordKey}`,
   cid: MOCK_CID,
 });
 
 /**
  * Build one mock EventView (lexicon record fields + AppView metadata).
- * @param {object} fields overrides; must include `did` and `rkey`
+ * @param {object} fields overrides; must include `authorDid` (the host's DID) and
+ *   `recordKey` (the event record's key)
  * @returns {object}
  */
-function mockEvent({ did, rkey, ...fields }) {
+function mockEvent({ authorDid, recordKey, ...fields }) {
   return {
-    uri: `at://${did}/${EVENT_NSID}/${rkey}`,
+    uri: `at://${authorDid}/${EVENT_NSID}/${recordKey}`,
     cid: MOCK_CID,
-    authorDid: did,
+    authorDid,
     source: "atproto",
     sourceUrl: null,
     createdAt: hoursFromNow(-48),
@@ -84,8 +85,8 @@ function mockEvent({ did, rkey, ...fields }) {
 function mockEvents() {
   return [
     mockEvent({
-      did: demoDid(),
-      rkey: "mock-tacos",
+      authorDid: demoDid(),
+      recordKey: "mock-tacos",
       authorHandle: "you.demo.test",
       name: "Taco Tuesday at Price Center",
       description:
@@ -111,8 +112,8 @@ function mockEvents() {
       ],
     }),
     mockEvent({
-      did: "did:plc:mockacm0000000",
-      rkey: "mock-hackathon",
+      authorDid: "did:plc:mockacm0000000",
+      recordKey: "mock-hackathon",
       authorHandle: "acm.ucsd.edu",
       name: "ACM Fall Hack Night",
       description: "Build something cool in 6 hours. Pizza provided.",
@@ -128,8 +129,8 @@ function mockEvents() {
       group: mockGroupRef("did:plc:mockacm0000000", "acm-at-ucsd"),
     }),
     mockEvent({
-      did: "did:plc:mockclub0000000",
-      rkey: "mock-sunset",
+      authorDid: "did:plc:mockclub0000000",
+      recordKey: "mock-sunset",
       authorHandle: "sunsetclub.bsky.social",
       name: "Sunset Walk (meet-up spot TBD)",
       description:
@@ -141,8 +142,8 @@ function mockEvents() {
       tags: ["outdoors"],
     }),
     mockEvent({
-      did: "did:plc:mockclub0000000",
-      rkey: "mock-ended",
+      authorDid: "did:plc:mockclub0000000",
+      recordKey: "mock-ended",
       authorHandle: "sunsetclub.bsky.social",
       name: "Morning Yoga (already ended)",
       description: "Previews the “This event has ended” state.",
@@ -199,25 +200,30 @@ export function createMockFetch() {
       }),
     "/api/events": () => respond({ events: events, cursor: null }),
     "/api/event": (params) => {
-      const event = events.find((ev) => ev.uri === params.get("uri"));
+      const event = events.find(
+        (candidate) => candidate.uri === params.get("uri"),
+      );
       return event ? respond(event) : respond({ error: "NotFound" }, 404);
     },
-    "/api/tags": () => respond(facetCounts(events.flatMap((ev) => ev.tags))),
+    "/api/tags": () =>
+      respond(facetCounts(events.flatMap((event) => event.tags))),
     "/api/groups": () =>
       respond(
         facetCounts(
-          events.map((ev) => describeGroup(ev.group)?.label).filter(Boolean),
+          events
+            .map((event) => describeGroup(event.group)?.label)
+            .filter(Boolean),
         ),
       ),
     "/api/notifications": () => respond([]),
     "/api/dev/records": () => respond({ ok: true }),
   };
 
-  return async (url, init) => {
+  return async (url, requestInit) => {
     const parsed = new URL(url, globalThis.location.origin);
     const handler = handlers[parsed.pathname];
     return handler
-      ? handler(parsed.searchParams, init)
+      ? handler(parsed.searchParams, requestInit)
       : respond({ error: "NotFound" }, 404);
   };
 }

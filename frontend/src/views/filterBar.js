@@ -3,7 +3,7 @@
  * Stateless UI: it renders a FilterState and reports changes via onChange(patch).
  * @module views/filterBar
  */
-import { h } from "../dom.js";
+import { createElementTree } from "../dom.js";
 import { toggleTag } from "../filters.js";
 import { debounce } from "../util.js";
 
@@ -19,23 +19,23 @@ export function createFilterBar(
   root,
   { onChange, debounceMs = 300, geoSupported = true },
 ) {
-  let state = { tags: [], group: "", q: "", nearMe: false };
-  const emitQ = debounce((q) => onChange({ q }), debounceMs);
+  let state = { tags: [], group: "", searchText: "", nearMe: false };
+  const emitQ = debounce((searchText) => onChange({ searchText }), debounceMs);
 
-  const search = h("input", {
+  const search = createElementTree("input", {
     type: "search",
     id: "f-q",
     name: "q",
     autocomplete: "off",
     placeholder: "Search events",
-    oninput: (e) => emitQ(e.target.value),
+    oninput: (inputEvent) => emitQ(inputEvent.target.value),
   });
-  const group = h("select", {
+  const group = createElementTree("select", {
     id: "f-group",
     name: "group",
-    onchange: (e) => onChange({ group: e.target.value }),
+    onchange: (changeEvent) => onChange({ group: changeEvent.target.value }),
   });
-  const nearMe = h(
+  const nearMe = createElementTree(
     "button",
     {
       type: "button",
@@ -46,69 +46,93 @@ export function createFilterBar(
     },
     "Near me",
   );
-  const chips = h("ul", { class: "chips", "aria-label": "Filter by tag" });
+  const chips = createElementTree("ul", {
+    class: "chips",
+    "aria-label": "Filter by tag",
+  });
 
   root.replaceChildren(
-    h(
+    createElementTree(
       "div",
       { class: "filters__row" },
-      h("label", { for: "f-group", class: "visually-hidden" }, "Group"),
+      createElementTree(
+        "label",
+        { for: "f-group", class: "visually-hidden" },
+        "Group",
+      ),
       group,
-      h("label", { for: "f-q", class: "visually-hidden" }, "Search events"),
+      createElementTree(
+        "label",
+        { for: "f-q", class: "visually-hidden" },
+        "Search events",
+      ),
       search,
       nearMe,
     ),
     chips,
   );
 
-  function render(next, { tags = [], groups = [], nearMeBusy = false } = {}) {
-    state = next;
-    if (document.activeElement !== search && search.value !== next.q)
-      search.value = next.q;
-    renderGroups(groups, next.group);
-    nearMe.setAttribute("aria-pressed", String(next.nearMe));
+  function render(
+    filterState,
+    { tags = [], groups = [], nearMeBusy = false } = {},
+  ) {
+    state = filterState;
+    if (
+      document.activeElement !== search &&
+      search.value !== filterState.searchText
+    )
+      search.value = filterState.searchText;
+    renderGroups(groups, filterState.group);
+    nearMe.setAttribute("aria-pressed", String(filterState.nearMe));
     nearMe.textContent = nearMeBusy ? "Locating…" : "Near me";
-    renderChips(tags, next.tags);
+    renderChips(tags, filterState.tags);
   }
 
   function renderGroups(groups, selected) {
-    const opts = [
-      h("option", { value: "" }, "All groups"),
-      ...groups.map((g) =>
-        h("option", { value: g.value }, `${g.value} (${g.count})`),
+    const options = [
+      createElementTree("option", { value: "" }, "All groups"),
+      ...groups.map((groupFacet) =>
+        createElementTree(
+          "option",
+          { value: groupFacet.value },
+          `${groupFacet.value} (${groupFacet.count})`,
+        ),
       ),
     ];
-    if (selected && !groups.some((g) => g.value === selected))
-      opts.push(h("option", { value: selected }, selected));
-    group.replaceChildren(...opts);
+    if (selected && !groups.some((groupFacet) => groupFacet.value === selected))
+      options.push(createElementTree("option", { value: selected }, selected));
+    group.replaceChildren(...options);
     group.value = selected || "";
   }
 
   function renderChips(tags, active) {
     const focused = document.activeElement?.dataset?.tag;
-    const values = [...new Set([...active, ...tags.map((t) => t.value)])];
+    const values = [
+      ...new Set([...active, ...tags.map((tagFacet) => tagFacet.value)]),
+    ];
     chips.replaceChildren(
-      ...values.map((v) =>
-        h(
+      ...values.map((tagValue) =>
+        createElementTree(
           "li",
           null,
-          h(
+          createElementTree(
             "button",
             {
               type: "button",
               class: "chip",
-              "aria-pressed": String(active.includes(v)),
-              dataset: { tag: v },
-              onclick: () => onChange({ tags: toggleTag(state.tags, v) }),
+              "aria-pressed": String(active.includes(tagValue)),
+              dataset: { tag: tagValue },
+              onclick: () =>
+                onChange({ tags: toggleTag(state.tags, tagValue) }),
             },
-            `#${v}`,
+            `#${tagValue}`,
           ),
         ),
       ),
     );
     if (focused)
       [...chips.querySelectorAll("button")]
-        .find((b) => b.dataset.tag === focused)
+        .find((chipButton) => chipButton.dataset.tag === focused)
         ?.focus();
   }
 

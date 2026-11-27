@@ -133,7 +133,7 @@ function readHttpUrlList(reader, name) {
   if (value === null) return null;
   const urls = value
     .split(",")
-    .map((item) => item.trim())
+    .map((listEntry) => listEntry.trim())
     .filter(Boolean);
   if (!urls.length || !urls.every(isHttpUrl))
     return reader.fail(name, "must be comma-separated http(s) URLs", value);
@@ -158,13 +158,13 @@ function readNumber(reader, name, { min, max, integer = false }) {
   const value = reader.required(name);
   if (value === null) return null;
   const number = Number(value);
-  const ok =
+  const isWithinRange =
     Number.isFinite(number) &&
     number >= min &&
     number <= max &&
     (!integer || Number.isInteger(number));
   const kind = integer ? "a whole number" : "a number";
-  return ok
+  return isWithinRange
     ? number
     : reader.fail(name, `must be ${kind} ${min}–${max}`, value);
 }
@@ -173,7 +173,9 @@ function readNumber(reader, name, { min, max, integer = false }) {
 function readTileUrl(reader, name) {
   const value = reader.required(name);
   if (value === null) return null;
-  const hasPlaceholders = TILE_PLACEHOLDERS.every((p) => value.includes(p));
+  const hasPlaceholders = TILE_PLACEHOLDERS.every((placeholder) =>
+    value.includes(placeholder),
+  );
   const withoutPlaceholders = value.replace(/\{[a-z]\}/g, "0");
   if (!hasPlaceholders || !isHttpUrl(withoutPlaceholders))
     return reader.fail(
@@ -227,7 +229,7 @@ export function loadConfig(env) {
 
 /**
  * @typedef {object} MockConfig
- * @property {{accessTokenPrefix: string, refreshTokenPrefix: string}} pds fake token
+ * @property {{accessTokenPrefix: string, refreshTokenPrefix: string}} tokenPrefixes fake token
  *   prefixes for the mock PDS; each token is the prefix followed by the user's DID
  */
 
@@ -252,7 +254,7 @@ function readTokenPrefix(reader, name) {
  */
 export function loadMockConfig(env) {
   const reader = createReader(env);
-  const pds = {
+  const tokenPrefixes = {
     accessTokenPrefix: readTokenPrefix(reader, MOCK_ENV_KEYS.accessTokenPrefix),
     refreshTokenPrefix: readTokenPrefix(
       reader,
@@ -260,12 +262,15 @@ export function loadMockConfig(env) {
     ),
   };
   // Equal prefixes would let a refresh token pass as an access token.
-  if (pds.accessTokenPrefix && pds.accessTokenPrefix === pds.refreshTokenPrefix)
+  if (
+    tokenPrefixes.accessTokenPrefix &&
+    tokenPrefixes.accessTokenPrefix === tokenPrefixes.refreshTokenPrefix
+  )
     reader.problems.push(
       `${MOCK_ENV_KEYS.refreshTokenPrefix} must differ from ${MOCK_ENV_KEYS.accessTokenPrefix}`,
     );
   if (reader.problems.length) throw new ConfigError(reader.problems);
-  return deepFreeze({ pds });
+  return deepFreeze({ tokenPrefixes });
 }
 
 /**

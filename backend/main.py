@@ -6,8 +6,8 @@ in development; see backend/.env.example and backend/config.py).
 
 import os
 
-from backend.api import health_check
-from backend.config import configure_logging, load_env_file, load_settings
+from api import health_check
+from config import configure_logging, load_env_file, load_settings
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 

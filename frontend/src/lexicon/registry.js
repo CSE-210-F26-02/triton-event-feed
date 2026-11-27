@@ -56,25 +56,25 @@ export { eventLexicon, subscriptionLexicon };
  */
 export function toIssue(message) {
   const match = /^Record((?:\/[^\s/]+)*)(?:\s|$)/.exec(message);
-  const parts = match ? match[1].split("/").filter(Boolean) : [];
+  const pathSegments = match ? match[1].split("/").filter(Boolean) : [];
   // For a missing field, point at the field itself, e.g. "location.lat".
   const missing = /must have the property "([^"]+)"/.exec(message);
-  if (missing) parts.push(missing[1]);
-  return { path: parts.join("."), message };
+  if (missing) pathSegments.push(missing[1]);
+  return { path: pathSegments.join("."), message };
 }
 
 /**
  * Run the lexicon rules for one record type. assertValidRecord stops at the first
  * problem, so this returns at most one issue.
- * @param {string} nsid e.g. "app.communitymap.event"
+ * @param {string} lexiconId e.g. "app.communitymap.event"
  * @param {unknown} record
  * @returns {ValidationIssue[]}
  */
-export function lexiconIssues(nsid, record) {
+export function lexiconIssues(lexiconId, record) {
   try {
-    lexicons.assertValidRecord(nsid, record);
+    lexicons.assertValidRecord(lexiconId, record);
     return [];
-  } catch (err) {
-    return [toIssue(err instanceof Error ? err.message : String(err))];
+  } catch (error) {
+    return [toIssue(error instanceof Error ? error.message : String(error))];
   }
 }

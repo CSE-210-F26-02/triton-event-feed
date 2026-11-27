@@ -2,16 +2,16 @@
 
 /** In-memory Storage implementation. */
 export function memoryStorage() {
-  const m = new Map();
+  const storedItems = new Map();
   return {
     get length() {
-      return m.size;
+      return storedItems.size;
     },
-    key: (i) => [...m.keys()][i] ?? null,
-    getItem: (k) => (m.has(k) ? m.get(k) : null),
-    setItem: (k, v) => m.set(k, String(v)),
-    removeItem: (k) => m.delete(k),
-    clear: () => m.clear(),
+    key: (index) => [...storedItems.keys()][index] ?? null,
+    getItem: (key) => (storedItems.has(key) ? storedItems.get(key) : null),
+    setItem: (key, value) => storedItems.set(key, String(value)),
+    removeItem: (key) => storedItems.delete(key),
+    clear: () => storedItems.clear(),
   };
 }
 
@@ -20,7 +20,7 @@ export function jsonResponse(body, status = 200, headers = {}) {
   return {
     ok: status >= 200 && status < 300,
     status,
-    headers: { get: (k) => headers[k.toLowerCase()] ?? null },
+    headers: { get: (headerName) => headers[headerName.toLowerCase()] ?? null },
     text: async () => (body === undefined ? "" : JSON.stringify(body)),
   };
 }

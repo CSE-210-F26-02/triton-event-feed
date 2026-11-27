@@ -34,8 +34,8 @@ LEXICON_PATH = (
     / "subscription.json"
 )
 
-with LEXICON_PATH.open(encoding="utf-8") as _file:
-    LEXICON = json.load(_file)
+with LEXICON_PATH.open(encoding="utf-8") as _lexicon_file:
+    LEXICON = json.load(_lexicon_file)
 
 _RECORD = LEXICON["defs"]["main"]["record"]
 SUBSCRIPTION_REQUIRED: list[str] = _RECORD["required"]
@@ -44,15 +44,15 @@ SUBSCRIPTION_REQUIRED: list[str] = _RECORD["required"]
 _RECORD_URI_RE = re.compile(r"^at://([^/]+)/([^/]+)/([^/?#]+)$")
 
 
-def _check_subject_uri(uri: Any) -> list[str]:
+def _check_subject_uri(subject_uri: Any) -> list[str]:
     """Check that subject.uri is an at:// URI of an event record.
 
     A rule the lexicon language can't express: the strongRef must point at an
     app.communitymap.event, not at any other kind of record.
     """
-    if not isinstance(uri, str) or not uri.startswith("at://"):
+    if not isinstance(subject_uri, str) or not subject_uri.startswith("at://"):
         return ['subject.uri must be a string starting with "at://"']
-    match = _RECORD_URI_RE.match(uri)
+    match = _RECORD_URI_RE.match(subject_uri)
     if not match or match.group(2) != EVENT_NSID:
         return [f"subject.uri must point at an {EVENT_NSID} record"]
     return []
@@ -68,10 +68,10 @@ def _check_subject(subject: Any) -> list[str]:
         errors.append("subject.uri is required")
     else:
         errors += _check_subject_uri(subject["uri"])
-    cid = subject.get("cid")
+    subject_cid = subject.get("cid")
     if "cid" not in subject:
         errors.append("subject.cid is required")
-    elif not isinstance(cid, str) or not cid:
+    elif not isinstance(subject_cid, str) or not subject_cid:
         errors.append("subject.cid must be a non-empty string")
     return errors
 

@@ -12,7 +12,7 @@
  * exist or failed to load are listed separately so the user can still unsubscribe.
  * @module views/subscriptionsView
  */
-import { h } from "../dom.js";
+import { createElementTree } from "../dom.js";
 import { isEnded } from "../filters.js";
 import { isPlainObject } from "../lexicon/eventView.js";
 import { renderCard } from "./listView.js";
@@ -57,8 +57,11 @@ export function partitionSubscriptions(uris, loaded, now) {
       if (!isEnded(entry.event, now)) upcoming.push(entry.event);
     } else unavailable.push(uri);
   }
-  const startOf = (ev) => Date.parse(ev.startsAt) || Number.POSITIVE_INFINITY;
-  upcoming.sort((a, b) => startOf(a) - startOf(b));
+  const startOf = (event) =>
+    Date.parse(event.startsAt) || Number.POSITIVE_INFINITY;
+  upcoming.sort(
+    (firstEvent, secondEvent) => startOf(firstEvent) - startOf(secondEvent),
+  );
   return { upcoming, unavailable, loading };
 }
 
@@ -74,9 +77,14 @@ export async function loadSubscribedEvent(uri, { api, findEvent }) {
   if (isPlainObject(cached)) return { event: cached };
   try {
     const result = await api.getEvent(uri);
-    const data = result?.data;
-    if (!isPlainObject(data)) return { gone: true };
-    return { event: typeof data.uri === "string" ? data : { ...data, uri } };
+    const fetchedEvent = result?.data;
+    if (!isPlainObject(fetchedEvent)) return { gone: true };
+    return {
+      event:
+        typeof fetchedEvent.uri === "string"
+          ? fetchedEvent
+          : { ...fetchedEvent, uri },
+    };
   } catch (error) {
     return GONE_STATUSES.has(error?.status) ? { gone: true } : { failed: true };
   }
@@ -85,25 +93,29 @@ export async function loadSubscribedEvent(uri, { api, findEvent }) {
 /**
  * One unavailable subscription: a link to the event page plus an Unsubscribe button.
  * @param {string} uri
- * @param {{onOpen: (uri: string) => void, onUnsubscribe: (uri: string) => void}} deps
+ * @param {{onOpen: (uri: string) => void, onUnsubscribe: (uri: string) => void}} dependencies
  * @returns {HTMLElement}
  */
-const renderUnavailable = (uri, deps) =>
-  h(
+const renderUnavailable = (uri, dependencies) =>
+  createElementTree(
     "li",
     { class: "subscriptions__unavailable", dataset: { uri } },
-    h(
+    createElementTree(
       "button",
-      { type: "button", class: "linklike", onclick: () => deps.onOpen(uri) },
+      {
+        type: "button",
+        class: "linklike",
+        onclick: () => dependencies.onOpen(uri),
+      },
       "An event that couldn't be loaded",
     ),
-    h(
+    createElementTree(
       "button",
       {
         type: "button",
         class: "btn",
         dataset: { action: "unsubscribe" },
-        onclick: () => deps.onUnsubscribe(uri),
+        onclick: () => dependencies.onUnsubscribe(uri),
       },
       "Unsubscribe",
     ),
@@ -111,40 +123,45 @@ const renderUnavailable = (uri, deps) =>
 
 /**
  * The list (or empty / loading state) for a logged-in user.
- * @param {{upcoming: object[], unavailable: string[], loading: number}} parts
+ * @param {{upcoming: object[], unavailable: string[], loading: number}} partition
  * @param {Set<string>} subscribed
- * @param {object} deps view deps
+ * @param {object} dependencies view deps
  * @param {Date} now
  * @returns {(HTMLElement|false)[]}
  */
-function renderSubscribedContent(parts, subscribed, deps, now) {
-  const { upcoming, unavailable, loading } = parts;
+function renderSubscribedContent(partition, subscribed, dependencies, now) {
+  const { upcoming, unavailable, loading } = partition;
   const cardOpts = {
     subscribed,
     now,
     idPrefix: CARD_ID_PREFIX,
-    onOpen: deps.onOpen,
-    onToggleSubscribe: deps.onToggleSubscribe,
+    onOpen: dependencies.onOpen,
+    onToggleSubscribe: dependencies.onToggleSubscribe,
   };
   const nothing = !upcoming.length && !unavailable.length && !loading;
   return [
     upcoming.length > 0 &&
-      h(
+      createElementTree(
         "div",
         { class: "grid subscriptions__list" },
-        upcoming.map((ev) => renderCard(ev, cardOpts)),
+        upcoming.map((event) => renderCard(event, cardOpts)),
       ),
-    loading > 0 && h("p", { class: "loading", role: "status" }, LOADING_TEXT),
-    nothing && h("p", { class: "empty" }, EMPTY_TEXT),
+    loading > 0 &&
+      createElementTree(
+        "p",
+        { class: "loading", role: "status" },
+        LOADING_TEXT,
+      ),
+    nothing && createElementTree("p", { class: "empty" }, EMPTY_TEXT),
     unavailable.length > 0 &&
-      h(
+      createElementTree(
         "section",
         { class: "detail__section", "aria-labelledby": "subs-unavailable" },
-        h("h3", { id: "subs-unavailable" }, UNAVAILABLE_TITLE),
-        h(
+        createElementTree("h3", { id: "subs-unavailable" }, UNAVAILABLE_TITLE),
+        createElementTree(
           "ul",
           { class: "subscriptions__unavailable-list" },
-          unavailable.map((uri) => renderUnavailable(uri, deps)),
+          unavailable.map((uri) => renderUnavailable(uri, dependencies)),
         ),
       ),
   ];
@@ -153,38 +170,43 @@ function renderSubscribedContent(parts, subscribed, deps, now) {
 /**
  * Render the whole page.
  * @param {{loggedIn: boolean, parts?: object, subscribed?: Set<string>, now: Date}} state
- * @param {object} deps view deps
+ * @param {object} dependencies view deps
  * @returns {HTMLElement}
  */
-export function renderSubscriptionsPage(state, deps) {
+export function renderSubscriptionsPage(state, dependencies) {
   const body = state.loggedIn
-    ? renderSubscribedContent(state.parts, state.subscribed, deps, state.now)
+    ? renderSubscribedContent(
+        state.parts,
+        state.subscribed,
+        dependencies,
+        state.now,
+      )
     : [
-        h("p", null, LOGGED_OUT_TEXT),
-        h(
+        createElementTree("p", null, LOGGED_OUT_TEXT),
+        createElementTree(
           "button",
           {
             type: "button",
             class: "btn btn--gold",
             dataset: { action: "login" },
-            onclick: () => deps.onLogin(),
+            onclick: () => dependencies.onLogin(),
           },
           "Log in",
         ),
       ];
-  return h(
+  return createElementTree(
     "article",
     { class: "detail subscriptions", "aria-labelledby": "subscriptions-title" },
-    h(
+    createElementTree(
       "div",
       { class: "detail__toolbar" },
-      h(
+      createElementTree(
         "button",
-        { type: "button", class: "btn", onclick: () => deps.onClose() },
+        { type: "button", class: "btn", onclick: () => dependencies.onClose() },
         "← Back to map",
       ),
     ),
-    h(
+    createElementTree(
       "h2",
       { id: "subscriptions-title", class: "detail__title", tabindex: "-1" },
       SUBSCRIPTIONS_TITLE,
@@ -208,31 +230,31 @@ async function fetchMissing(subscribed, loaded, inFlight, loadDeps) {
     (uri) => !loaded.has(uri) && !inFlight.has(uri),
   );
   missing.forEach((uri) => inFlight.add(uri));
-  const entries = await Promise.all(
+  const loadedEntries = await Promise.all(
     missing.map((uri) => loadSubscribedEvent(uri, loadDeps)),
   );
   missing.forEach((uri) => inFlight.delete(uri));
-  return new Map(missing.map((uri, i) => [uri, entries[i]]));
+  return new Map(missing.map((uri, index) => [uri, loadedEntries[index]]));
 }
 
 /**
  * Render the page into `root` from current state, keeping focus on the title if it had it.
  * @param {HTMLElement} root
- * @param {SubscriptionsViewDeps} deps
+ * @param {SubscriptionsViewDeps} dependencies
  * @param {Map<string, LoadedEntry>} loaded
  * @param {Date} now
  */
-function paintPage(root, deps, loaded, now) {
+function paintPage(root, dependencies, loaded, now) {
   const hadFocus = document.activeElement?.id === "subscriptions-title";
-  const subscribed = deps.getSubscribed();
+  const subscribed = dependencies.getSubscribed();
   const page = renderSubscriptionsPage(
     {
-      loggedIn: deps.isLoggedIn(),
+      loggedIn: dependencies.isLoggedIn(),
       parts: partitionSubscriptions(subscribed, loaded, now),
       subscribed,
       now,
     },
-    deps,
+    dependencies,
   );
   root.replaceChildren(page);
   if (hadFocus) page.querySelector("#subscriptions-title")?.focus();
@@ -255,18 +277,18 @@ function paintPage(root, deps, loaded, now) {
 /**
  * Create the My subscriptions controller.
  * @param {HTMLElement} root
- * @param {SubscriptionsViewDeps} deps
+ * @param {SubscriptionsViewDeps} dependencies
  * @returns {{open(): Promise<void>, refresh(): Promise<void>, close(): void,
  *   readonly isOpen: boolean}}
  */
-export function createSubscriptionsView(root, deps) {
-  const { findEvent = () => null, now = () => new Date() } = deps;
+export function createSubscriptionsView(root, dependencies) {
+  const { findEvent = () => null, now = () => new Date() } = dependencies;
   const loaded = new Map(); // uri → LoadedEntry, kept while the page is open
   let isOpen = false;
   let generation = 0; // bumped on open/close so stale loads are discarded
   let inFlight = new Set(); // URIs being fetched in the current generation
 
-  const paint = () => paintPage(root, deps, loaded, now());
+  const paint = () => paintPage(root, dependencies, loaded, now());
 
   /**
    * Re-render now, then fetch subscribed events that are neither loaded nor already
@@ -275,13 +297,18 @@ export function createSubscriptionsView(root, deps) {
   async function refresh() {
     if (!isOpen) return;
     paint();
-    if (!deps.isLoggedIn()) return;
-    const mine = generation;
-    const fetched = await fetchMissing(deps.getSubscribed(), loaded, inFlight, {
-      api: deps.api,
-      findEvent,
-    });
-    if (!fetched.size || mine !== generation || !isOpen) return;
+    if (!dependencies.isLoggedIn()) return;
+    const thisGeneration = generation;
+    const fetched = await fetchMissing(
+      dependencies.getSubscribed(),
+      loaded,
+      inFlight,
+      {
+        api: dependencies.api,
+        findEvent,
+      },
+    );
+    if (!fetched.size || thisGeneration !== generation || !isOpen) return;
     fetched.forEach((entry, uri) => loaded.set(uri, entry));
     paint();
   }

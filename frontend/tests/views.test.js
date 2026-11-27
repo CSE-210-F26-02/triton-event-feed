@@ -10,15 +10,15 @@ import { createGeo } from "../src/geo.js";
 import { sampleEvent, testConfig } from "./helpers.js";
 
 /** Map settings from the shared test env (what frontend/.env provides in the app). */
-const MAP = (await testConfig()).map;
+const TEST_MAP_CONFIG = (await testConfig()).map;
 
 describe("mapView.buildMarkers", () => {
   it("keeps only events with valid coordinates", () => {
-    const ms = buildMarkers(
+    const delayMs = buildMarkers(
       [sampleEvent(), sampleEvent({ uri: "x", location: { name: "No pin" } })],
       { timeZone: "UTC", locale: "en-US" },
     );
-    expect(ms).toEqual([
+    expect(delayMs).toEqual([
       {
         uri: sampleEvent().uri,
         lat: 32.8797,
@@ -30,29 +30,32 @@ describe("mapView.buildMarkers", () => {
   });
 
   it("tile provider is configurable", async () => {
-    const L = fakeLeaflet();
-    globalThis.L = L;
+    const leaflet = fakeLeaflet();
+    globalThis.L = leaflet;
     const root = document.createElement("div");
     const view = createMapView(root, {
-      config: { ...MAP, tileUrl: "https://tiles.example/{z}/{x}/{y}.pbf" },
-      load: async () => L,
+      config: {
+        ...TEST_MAP_CONFIG,
+        tileUrl: "https://tiles.example/{z}/{x}/{y}.pbf",
+      },
+      load: async () => leaflet,
     });
     await view.show([sampleEvent()]);
-    expect(L.tileLayer).toHaveBeenCalledWith(
+    expect(leaflet.tileLayer).toHaveBeenCalledWith(
       "https://tiles.example/{z}/{x}/{y}.pbf",
       expect.objectContaining({
-        maxZoom: MAP.maxZoom,
-        attribution: MAP.attribution,
+        maxZoom: TEST_MAP_CONFIG.maxZoom,
+        attribution: TEST_MAP_CONFIG.attribution,
       }),
     );
-    expect(L.marker).toHaveBeenCalledTimes(1);
+    expect(leaflet.marker).toHaveBeenCalledTimes(1);
     delete globalThis.L;
   });
 
   it("shows an error when Leaflet fails to load", async () => {
     const root = document.createElement("div");
     await createMapView(root, {
-      config: MAP,
+      config: TEST_MAP_CONFIG,
       load: async () => {
         throw new Error("x");
       },
@@ -61,7 +64,7 @@ describe("mapView.buildMarkers", () => {
   });
 
   it("initializes once and uses the latest events while the map loads", async () => {
-    const L = fakeLeaflet();
+    const leaflet = fakeLeaflet();
     let finishLoading;
     const load = vi.fn(
       () =>
@@ -70,22 +73,22 @@ describe("mapView.buildMarkers", () => {
         }),
     );
     const view = createMapView(document.createElement("div"), {
-      config: MAP,
+      config: TEST_MAP_CONFIG,
       load,
     });
-    const first = view.show([sampleEvent()]);
+    const firstShow = view.show([sampleEvent()]);
     const latest = view.show([
       sampleEvent({
         name: "Updated event",
         location: { lat: 32.88, lng: -117.23 },
       }),
     ]);
-    finishLoading(L);
-    await Promise.all([first, latest]);
+    finishLoading(leaflet);
+    await Promise.all([firstShow, latest]);
     expect(load).toHaveBeenCalledTimes(1);
-    expect(L.map).toHaveBeenCalledTimes(1);
-    expect(L.marker).toHaveBeenCalledTimes(1);
-    expect(L.marker).toHaveBeenCalledWith([32.88, -117.23], {
+    expect(leaflet.map).toHaveBeenCalledTimes(1);
+    expect(leaflet.marker).toHaveBeenCalledTimes(1);
+    expect(leaflet.marker).toHaveBeenCalledWith([32.88, -117.23], {
       title: "Updated event",
     });
   });
@@ -93,11 +96,11 @@ describe("mapView.buildMarkers", () => {
 
 describe("mapView config (from frontend/.env)", () => {
   it("accepts a complete config and returns it", () => {
-    expect(assertMapConfig(MAP)).toBe(MAP);
+    expect(assertMapConfig(TEST_MAP_CONFIG)).toBe(TEST_MAP_CONFIG);
   });
 
   it("names every missing field", () => {
-    const { tileUrl: _tileUrl, zoom: _zoom, ...partial } = MAP;
+    const { tileUrl: _tileUrl, zoom: _zoom, ...partial } = TEST_MAP_CONFIG;
     expect(() => assertMapConfig(partial)).toThrow(
       "Map config is missing: tileUrl, zoom",
     );
@@ -111,15 +114,19 @@ describe("mapView config (from frontend/.env)", () => {
   });
 
   it("starts the main map at the configured center and zoom", async () => {
-    const L = fakeLeaflet();
+    const leaflet = fakeLeaflet();
     const setView = vi.fn(function () {
       return this;
     });
-    L.map = vi.fn(() => ({ setView, invalidateSize() {}, fitBounds() {} }));
+    leaflet.map = vi.fn(() => ({
+      setView,
+      invalidateSize() {},
+      fitBounds() {},
+    }));
     const root = document.createElement("div");
     await createMapView(root, {
-      config: { ...MAP, center: [1, 2], zoom: 7 },
-      load: async () => L,
+      config: { ...TEST_MAP_CONFIG, center: [1, 2], zoom: 7 },
+      load: async () => leaflet,
     }).show([]);
     expect(setView).toHaveBeenCalledWith([1, 2], 7);
   });
@@ -127,13 +134,14 @@ describe("mapView config (from frontend/.env)", () => {
 
 describe("mapView.createPinMap", () => {
   it("centers a single marker on the event", async () => {
-    const L = fakeLeaflet();
+    const leaflet = fakeLeaflet();
     const root = document.createElement("div");
-    await createPinMap(root, { config: MAP, load: async () => L }).show(
-      sampleEvent(),
-    );
+    await createPinMap(root, {
+      config: TEST_MAP_CONFIG,
+      load: async () => leaflet,
+    }).show(sampleEvent());
     expect(root.querySelector(".map")).not.toBeNull();
-    expect(L.marker).toHaveBeenCalledWith([32.8797, -117.2362], {
+    expect(leaflet.marker).toHaveBeenCalledWith([32.8797, -117.2362], {
       title: "Taco Tuesday",
     });
   });
@@ -141,7 +149,7 @@ describe("mapView.createPinMap", () => {
   it("explains when the event has no coordinates", async () => {
     const load = vi.fn();
     const root = document.createElement("div");
-    await createPinMap(root, { config: MAP, load }).show(
+    await createPinMap(root, { config: TEST_MAP_CONFIG, load }).show(
       sampleEvent({ location: { name: "TBD" } }),
     );
     expect(load).not.toHaveBeenCalled();
@@ -151,25 +159,28 @@ describe("mapView.createPinMap", () => {
   it("shows an error when Leaflet fails, and does nothing once destroyed", async () => {
     const failing = document.createElement("div");
     await createPinMap(failing, {
-      config: MAP,
+      config: TEST_MAP_CONFIG,
       load: async () => {
         throw new Error("offline");
       },
     }).show(sampleEvent());
     expect(failing.querySelector("[role=alert]")).not.toBeNull();
 
-    const L = fakeLeaflet();
+    const leaflet = fakeLeaflet();
     const root = document.createElement("div");
-    const pin = createPinMap(root, { config: MAP, load: async () => L });
-    const pending = pin.show(sampleEvent());
-    pin.destroy();
+    const pinMap = createPinMap(root, {
+      config: TEST_MAP_CONFIG,
+      load: async () => leaflet,
+    });
+    const pending = pinMap.show(sampleEvent());
+    pinMap.destroy();
     await pending;
-    expect(L.map).not.toHaveBeenCalled();
+    expect(leaflet.map).not.toHaveBeenCalled();
   });
 });
 
 function fakeLeaflet() {
-  const chain = () => ({
+  const fakeLayer = () => ({
     addTo() {
       return this;
     },
@@ -184,10 +195,10 @@ function fakeLeaflet() {
     fitBounds() {},
   });
   return {
-    map: vi.fn(chain),
-    tileLayer: vi.fn(chain),
-    layerGroup: vi.fn(chain),
-    marker: vi.fn(chain),
+    map: vi.fn(fakeLayer),
+    tileLayer: vi.fn(fakeLayer),
+    layerGroup: vi.fn(fakeLayer),
+    marker: vi.fn(fakeLayer),
   };
 }
 
@@ -197,9 +208,9 @@ describe("filterBar", () => {
     const onChange = vi.fn();
     const root = document.createElement("div");
     document.body.replaceChildren(root);
-    const bar = createFilterBar(root, { onChange, debounceMs: 300 });
-    bar.render(
-      { tags: ["food"], group: "", q: "", nearMe: false },
+    const filterBar = createFilterBar(root, { onChange, debounceMs: 300 });
+    filterBar.render(
+      { tags: ["food"], group: "", searchText: "", nearMe: false },
       {
         tags: [
           { value: "food", count: 2 },
@@ -213,7 +224,7 @@ describe("filterBar", () => {
     chips[1].click();
     expect(onChange).toHaveBeenLastCalledWith({ tags: ["food", "music"] });
     const select = root.querySelector("select");
-    expect([...select.options].map((o) => o.textContent)).toEqual([
+    expect([...select.options].map((option) => option.textContent)).toEqual([
       "All groups",
       "ACM (4)",
     ]);
@@ -227,7 +238,7 @@ describe("filterBar", () => {
     input.dispatchEvent(new Event("input"));
     expect(onChange).toHaveBeenCalledTimes(2);
     vi.advanceTimersByTime(300);
-    expect(onChange).toHaveBeenLastCalledWith({ q: "tacos" });
+    expect(onChange).toHaveBeenLastCalledWith({ searchText: "tacos" });
     root.querySelector("button.btn").click();
     expect(onChange).toHaveBeenLastCalledWith({ nearMe: true });
     vi.useRealTimers();
@@ -237,15 +248,15 @@ describe("filterBar", () => {
 describe("geo", () => {
   it("keeps the position in memory only and can clear it", async () => {
     const geolocation = {
-      getCurrentPosition: (ok) =>
-        ok({ coords: { latitude: 32.88, longitude: -117.23 } }),
+      getCurrentPosition: (onSuccess) =>
+        onSuccess({ coords: { latitude: 32.88, longitude: -117.23 } }),
     };
-    const g = createGeo({ geolocation });
-    expect(g.position).toBeNull();
-    expect(await g.request()).toEqual({ lat: 32.88, lng: -117.23 });
-    expect(g.position).toEqual({ lat: 32.88, lng: -117.23 });
-    g.clear();
-    expect(g.position).toBeNull();
+    const geo = createGeo({ geolocation });
+    expect(geo.position).toBeNull();
+    expect(await geo.request()).toEqual({ lat: 32.88, lng: -117.23 });
+    expect(geo.position).toEqual({ lat: 32.88, lng: -117.23 });
+    geo.clear();
+    expect(geo.position).toBeNull();
     await expect(createGeo({ geolocation: null }).request()).rejects.toThrow();
   });
 });

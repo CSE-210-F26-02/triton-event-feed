@@ -21,7 +21,7 @@ globalThis.__CM_NO_AUTOSTART__ = true;
 const { start } = await import("../src/app.js");
 
 const html = readFileSync(resolve(__dirname, "../index.html"), "utf8");
-const flush = () => new Promise((r) => setTimeout(r, 0));
+const flush = () => new Promise((resolveFlush) => setTimeout(resolveFlush, 0));
 
 const HANDLE = "larry.test";
 /** Mock events (stubs/mockApi.js): one upcoming, one already ended. */
@@ -29,15 +29,16 @@ const UPCOMING_HASH = "#/event/did:plc:mockacm0000000/mock-hackathon";
 const ENDED_HASH = "#/event/did:plc:mockclub0000000/mock-ended";
 const UPCOMING_TITLE = "ACM Fall Hack Night";
 
-const $ = (selector) => document.querySelector(selector);
-const subscribeButton = () => $("#panel-detail [data-action=subscribe]");
+const findElement = (selector) => document.querySelector(selector);
+const subscribeButton = () =>
+  findElement("#panel-detail [data-action=subscribe]");
 const subscriptionsCards = () => [
   ...document.querySelectorAll("#panel-subscriptions .card h3"),
 ];
 
 /** Leaflet stand-in (the map view needs window.L). */
 function fakeLeaflet() {
-  const chain = () => ({
+  const fakeLayer = () => ({
     addTo() {
       return this;
     },
@@ -53,10 +54,10 @@ function fakeLeaflet() {
     remove() {},
   });
   return {
-    map: vi.fn(chain),
-    tileLayer: vi.fn(chain),
-    layerGroup: vi.fn(chain),
-    marker: vi.fn(chain),
+    map: vi.fn(fakeLayer),
+    tileLayer: vi.fn(fakeLayer),
+    layerGroup: vi.fn(fakeLayer),
+    marker: vi.fn(fakeLayer),
   };
 }
 
@@ -87,11 +88,13 @@ async function bootMockApp(
 
 /** Fill in and submit the login dialog. */
 async function submitLogin(handle = HANDLE, password = "app-password") {
-  const form = $("dialog form");
+  const form = findElement("dialog form");
   form.elements.identifier.value = handle;
   form.elements.password.value = password;
   form.dispatchEvent(new Event("submit", { cancelable: true }));
-  await vi.waitFor(() => expect($("#account").textContent).toContain(handle));
+  await vi.waitFor(() =>
+    expect(findElement("#account").textContent).toContain(handle),
+  );
 }
 
 /** Log in from the header's Log in button. */
@@ -103,7 +106,7 @@ async function logInFromHeader() {
 }
 
 /** Navigate to a hash and wait for the router to react. */
-async function go(hash) {
+async function navigateTo(hash) {
   location.hash = hash;
   await flush();
   await flush();
@@ -118,26 +121,26 @@ describe("subscriptions in the app (#19, ?mock)", () => {
   it("e2e 1: subscribe → Subscribed ✓ → listed on My subscriptions", async () => {
     await bootMockApp();
     await logInFromHeader();
-    await go(UPCOMING_HASH);
+    await navigateTo(UPCOMING_HASH);
     await waitForLabel(SUBSCRIBE_LABEL);
     subscribeButton().click();
     await waitForLabel(SUBSCRIBED_LABEL);
     expect(subscribeButton().getAttribute("aria-pressed")).toBe("true");
 
-    $("#account [data-action=my-subscriptions]").click();
+    findElement("#account [data-action=my-subscriptions]").click();
     await vi.waitFor(() =>
-      expect(subscriptionsCards().map((h) => h.textContent)).toEqual([
-        UPCOMING_TITLE,
-      ]),
+      expect(
+        subscriptionsCards().map((heading) => heading.textContent),
+      ).toEqual([UPCOMING_TITLE]),
     );
-    expect($("#panel-subscriptions").hidden).toBe(false);
-    expect($("#panel-detail").hidden).toBe(true);
+    expect(findElement("#panel-subscriptions").hidden).toBe(false);
+    expect(findElement("#panel-detail").hidden).toBe(true);
   });
 
   it("stores the subscription as a strongRef record on the user's PDS", async () => {
     const { local } = await bootMockApp();
     await logInFromHeader();
-    await go(UPCOMING_HASH);
+    await navigateTo(UPCOMING_HASH);
     await waitForLabel(SUBSCRIBE_LABEL);
     subscribeButton().click();
     await waitForLabel(SUBSCRIBED_LABEL);
@@ -155,7 +158,7 @@ describe("subscriptions in the app (#19, ?mock)", () => {
   it("e2e 2: after a reload the button still shows Subscribed ✓", async () => {
     const storages = await bootMockApp();
     await logInFromHeader();
-    await go(UPCOMING_HASH);
+    await navigateTo(UPCOMING_HASH);
     await waitForLabel(SUBSCRIBE_LABEL);
     subscribeButton().click();
     await waitForLabel(SUBSCRIBED_LABEL);
@@ -167,16 +170,16 @@ describe("subscriptions in the app (#19, ?mock)", () => {
   it("e2e 3: clicking Subscribed ✓ unsubscribes and removes it from My subscriptions", async () => {
     await bootMockApp();
     await logInFromHeader();
-    await go(UPCOMING_HASH);
+    await navigateTo(UPCOMING_HASH);
     await waitForLabel(SUBSCRIBE_LABEL);
     subscribeButton().click();
     await waitForLabel(SUBSCRIBED_LABEL);
     subscribeButton().click();
     await waitForLabel(SUBSCRIBE_LABEL);
 
-    await go("#/subscriptions");
+    await navigateTo("#/subscriptions");
     await vi.waitFor(() =>
-      expect($("#panel-subscriptions .empty")).not.toBeNull(),
+      expect(findElement("#panel-subscriptions .empty")).not.toBeNull(),
     );
     expect(subscriptionsCards()).toHaveLength(0);
   });
@@ -184,13 +187,13 @@ describe("subscriptions in the app (#19, ?mock)", () => {
   it("unsubscribing from My subscriptions removes the card", async () => {
     await bootMockApp();
     await logInFromHeader();
-    await go(UPCOMING_HASH);
+    await navigateTo(UPCOMING_HASH);
     await waitForLabel(SUBSCRIBE_LABEL);
     subscribeButton().click();
     await waitForLabel(SUBSCRIBED_LABEL);
-    await go("#/subscriptions");
+    await navigateTo("#/subscriptions");
     await vi.waitFor(() => expect(subscriptionsCards()).toHaveLength(1));
-    $("#panel-subscriptions [data-action=subscribe]").click();
+    findElement("#panel-subscriptions [data-action=subscribe]").click();
     await vi.waitFor(() => expect(subscriptionsCards()).toHaveLength(0));
   });
 
@@ -199,7 +202,7 @@ describe("subscriptions in the app (#19, ?mock)", () => {
     await waitForLabel(SUBSCRIBE_LABEL);
     subscribeButton().click();
     await flush();
-    expect($("#login-reason").textContent).toBe(
+    expect(findElement("#login-reason").textContent).toBe(
       "Log in to subscribe to this event.",
     );
     await submitLogin();
@@ -209,8 +212,8 @@ describe("subscriptions in the app (#19, ?mock)", () => {
 
   it("a logged-out Subscribe on a feed card returns to that event's page after login", async () => {
     await bootMockApp();
-    const card = [...document.querySelectorAll("#list .card")].find((c) =>
-      c.textContent.includes(UPCOMING_TITLE),
+    const card = [...document.querySelectorAll("#list .card")].find(
+      (candidateCard) => candidateCard.textContent.includes(UPCOMING_TITLE),
     );
     card.querySelector("[data-action=subscribe]").click();
     await flush();
@@ -234,23 +237,23 @@ describe("subscriptions in the app (#19, ?mock)", () => {
   it("e2e 5: an expired event shows no Subscribe button", async () => {
     await bootMockApp();
     await logInFromHeader();
-    await go(ENDED_HASH);
+    await navigateTo(ENDED_HASH);
     await vi.waitFor(() =>
-      expect($("#panel-detail .detail__ended")).not.toBeNull(),
+      expect(findElement("#panel-detail .detail__ended")).not.toBeNull(),
     );
     expect(subscribeButton()).toBeNull();
   });
 
   it("My subscriptions asks logged-out users to log in", async () => {
     await bootMockApp("#/subscriptions");
-    const panel = $("#panel-subscriptions");
+    const panel = findElement("#panel-subscriptions");
     expect(panel.hidden).toBe(false);
     expect(panel.querySelector("#subscriptions-title").textContent).toBe(
       "My subscriptions",
     );
     panel.querySelector("[data-action=login]").click();
     await flush();
-    expect($("#login-reason").textContent).toBe(
+    expect(findElement("#login-reason").textContent).toBe(
       "Log in to see your subscriptions.",
     );
   });
@@ -258,7 +261,7 @@ describe("subscriptions in the app (#19, ?mock)", () => {
   it("logging out clears the subscribed state", async () => {
     await bootMockApp();
     await logInFromHeader();
-    await go(UPCOMING_HASH);
+    await navigateTo(UPCOMING_HASH);
     await waitForLabel(SUBSCRIBE_LABEL);
     subscribeButton().click();
     await waitForLabel(SUBSCRIBED_LABEL);

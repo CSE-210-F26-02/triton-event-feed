@@ -38,8 +38,8 @@ LEXICON_PATH = (
     / "event.json"
 )
 
-with LEXICON_PATH.open(encoding="utf-8") as _file:
-    LEXICON = json.load(_file)
+with LEXICON_PATH.open(encoding="utf-8") as _lexicon_file:
+    LEXICON = json.load(_lexicon_file)
 
 _RECORD = LEXICON["defs"]["main"]["record"]
 _LOCATION = LEXICON["defs"]["location"]
@@ -87,15 +87,15 @@ def _check_string(value: Any, field: str, rules: dict) -> list[str]:
     min_bytes = rules.get("minLength")
     max_bytes = rules.get("maxLength")
     max_chars = rules.get("maxGraphemes")
-    size = len(value.encode("utf-8"))
+    byte_length = len(value.encode("utf-8"))
 
     errors = []
-    if min_bytes is not None and size < min_bytes:
+    if min_bytes is not None and byte_length < min_bytes:
         if min_bytes == 1:
             errors.append(f"{field} must not be empty")
         else:
             errors.append(f"{field} must be at least {min_bytes} bytes")
-    if max_bytes is not None and size > max_bytes:
+    if max_bytes is not None and byte_length > max_bytes:
         errors.append(f"{field} must be at most {max_bytes} bytes")
     if max_chars is not None and count_graphemes(value) > max_chars:
         errors.append(f"{field} must be at most {max_chars} characters")
@@ -143,9 +143,9 @@ def _check_coordinate(value: Any, field: str) -> list[str]:
         return errors
     if not _DECIMAL_RE.match(value):
         return [f'{name} must be a decimal number, e.g. "32.8801"']
-    low, high = _COORD_RANGES[field]
-    if not low <= float(value) <= high:
-        return [f"{name} must be between {low} and {high}"]
+    minimum, maximum = _COORD_RANGES[field]
+    if not minimum <= float(value) <= maximum:
+        return [f"{name} must be between {minimum} and {maximum}"]
     return []
 
 
@@ -180,8 +180,8 @@ def _check_tags(tags: Any) -> list[str]:
     errors = []
     if len(tags) > max_count:
         errors.append(f"tags must have at most {max_count} items")
-    for i, tag in enumerate(tags):
-        errors += _check_string(tag, f"tags[{i}]", tag_rules)
+    for index, tag in enumerate(tags):
+        errors += _check_string(tag, f"tags[{index}]", tag_rules)
     return errors
 
 
@@ -191,11 +191,11 @@ def _check_group(group: Any) -> list[str]:
         return ["group must be an object with uri and cid"]
 
     errors = []
-    uri = group.get("uri")
-    if not isinstance(uri, str) or not uri.startswith("at://"):
+    group_uri = group.get("uri")
+    if not isinstance(group_uri, str) or not group_uri.startswith("at://"):
         errors.append('group.uri must be a string starting with "at://"')
-    cid = group.get("cid")
-    if not isinstance(cid, str) or not cid:
+    group_cid = group.get("cid")
+    if not isinstance(group_cid, str) or not group_cid:
         errors.append("group.cid must be a non-empty string")
     return errors
 
@@ -243,9 +243,9 @@ def validate_event(record: Any) -> list[str]:
 
     # A rule the lexicon language can't express: the event must end after
     # it starts. Only checked when both datetimes are themselves valid.
-    starts = parse_datetime(record.get("startsAt"))
-    ends = parse_datetime(record.get("endsAt"))
-    if starts and ends and ends <= starts:
+    starts_at = parse_datetime(record.get("startsAt"))
+    ends_at = parse_datetime(record.get("endsAt"))
+    if starts_at and ends_at and ends_at <= starts_at:
         errors.append("endsAt must be after startsAt")
 
     return errors

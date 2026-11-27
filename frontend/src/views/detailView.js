@@ -8,7 +8,7 @@
  * shown best-effort with a warning instead of being trusted blindly.
  * @module views/detailView
  */
-import { h, safeHttpUrl } from "../dom.js";
+import { createElementTree, safeHttpUrl } from "../dom.js";
 import { isEnded, isUpdated } from "../filters.js";
 import {
   blueskyProfileUrl,
@@ -55,8 +55,8 @@ const warnInvalidRecord = (uri, issues) =>
 
 /**
  * @typedef {{canEdit?: boolean, subscribed?: boolean, ended?: boolean,
- *   onToggleSubscribe?: (ev: object) => void, onEdit?: (ev: object) => void,
- *   onDelete?: (ev: object) => void}} ActionOpts
+ *   onToggleSubscribe?: (event: object) => void, onEdit?: (event: object) => void,
+ *   onDelete?: (event: object) => void}} ActionOpts
  */
 
 /**
@@ -71,17 +71,17 @@ const warnInvalidRecord = (uri, issues) =>
  * @returns {HTMLElement}
  */
 function renderToolbar({ onClose, onCopyLink }, eventUri) {
-  return h(
+  return createElementTree(
     "div",
     { class: "detail__toolbar" },
-    h(
+    createElementTree(
       "button",
       { type: "button", class: "btn", onclick: () => onClose?.() },
       "← Back to map",
     ),
     eventUri &&
       onCopyLink &&
-      h(
+      createElementTree(
         "button",
         { type: "button", class: "btn", onclick: () => onCopyLink(eventUri) },
         "Copy link",
@@ -92,86 +92,116 @@ function renderToolbar({ onClose, onCopyLink }, eventUri) {
 /**
  * Notices under the title: "This event has ended", the lexicon warning, and
  * "Updated <time>" (only when the event was edited).
- * @param {import('../lexicon/eventView.js').DisplayEvent} ev
- * @param {DetailOpts} opts
+ * @param {import('../lexicon/eventView.js').DisplayEvent} event
+ * @param {DetailOpts} options
  * @param {boolean} ended
  * @returns {(HTMLElement|false)[]}
  */
-const renderHeaderNotices = (ev, opts, ended) => [
+const renderHeaderNotices = (event, options, ended) => [
   ended &&
-    h(
+    createElementTree(
       "p",
       { class: "notice detail__ended", role: "status" },
       "This event has ended",
     ),
-  ev.issues.length > 0 &&
-    h("p", { class: "notice detail__invalid" }, INVALID_RECORD_NOTICE),
-  isUpdated(ev) &&
-    h(
+  event.issues.length > 0 &&
+    createElementTree(
+      "p",
+      { class: "notice detail__invalid" },
+      INVALID_RECORD_NOTICE,
+    ),
+  isUpdated(event) &&
+    createElementTree(
       "p",
       { class: "detail__updated muted" },
       "Updated ",
-      h("time", { datetime: ev.updatedAt }, formatDateTime(ev.updatedAt, opts)),
+      createElementTree(
+        "time",
+        { datetime: event.updatedAt },
+        formatDateTime(event.updatedAt, options),
+      ),
     ),
 ];
 
 /**
  * Header: status badges, title, and the notices from renderHeaderNotices.
- * @param {import('../lexicon/eventView.js').DisplayEvent} ev
- * @param {DetailOpts} opts
+ * @param {import('../lexicon/eventView.js').DisplayEvent} event
+ * @param {DetailOpts} options
  * @returns {HTMLElement}
  */
-function renderHeader(ev, opts) {
-  const ended = isEnded(ev, opts.now);
-  const status = ended ? null : statusLabel(ev.status);
-  return h(
+function renderHeader(event, options) {
+  const ended = isEnded(event, options.now);
+  const status = ended ? null : statusLabel(event.status);
+  return createElementTree(
     "header",
     { class: "detail__header" },
-    h(
+    createElementTree(
       "div",
       { class: "card__badges" },
-      status && h("span", { class: `badge badge--${ev.status}` }, status),
-      opts.stale && h("span", { class: "badge" }, "Saved copy"),
+      status &&
+        createElementTree(
+          "span",
+          { class: `badge badge--${event.status}` },
+          status,
+        ),
+      options.stale &&
+        createElementTree("span", { class: "badge" }, "Saved copy"),
     ),
-    h(
+    createElementTree(
       "h2",
       { id: "detail-title", class: "detail__title", tabindex: "-1" },
-      ev.name,
+      event.name,
     ),
-    renderHeaderNotices(ev, opts, ended),
+    renderHeaderNotices(event, options, ended),
   );
 }
 
 /**
  * "When" value in local time. Falls back gracefully when the record's times are unusable:
  * no start → TIME_NOT_SPECIFIED; a start but no end → just the start.
- * @param {import('../lexicon/eventView.js').DisplayEvent} ev
- * @param {DetailOpts} opts
+ * @param {import('../lexicon/eventView.js').DisplayEvent} event
+ * @param {DetailOpts} options
  * @returns {HTMLElement}
  */
-function renderWhen(ev, opts) {
-  if (!ev.startsAt)
-    return h("span", { class: "detail__when muted" }, TIME_NOT_SPECIFIED);
-  const text = ev.endsAt
-    ? formatEventWhen(ev.startsAt, ev.endsAt, opts)
-    : formatDateTime(ev.startsAt, opts);
-  return h("time", { datetime: ev.startsAt, class: "detail__when" }, text);
+function renderWhen(event, options) {
+  if (!event.startsAt)
+    return createElementTree(
+      "span",
+      { class: "detail__when muted" },
+      TIME_NOT_SPECIFIED,
+    );
+  const text = event.endsAt
+    ? formatEventWhen(event.startsAt, event.endsAt, options)
+    : formatDateTime(event.startsAt, options);
+  return createElementTree(
+    "time",
+    { datetime: event.startsAt, class: "detail__when" },
+    text,
+  );
 }
 
 /**
  * Location: name (linked to OpenStreetMap when possible) and address on its own line.
- * @param {import('../lexicon/eventView.js').DisplayEvent} ev
+ * @param {import('../lexicon/eventView.js').DisplayEvent} event
  * @returns {HTMLElement[]}
  */
-function renderLocation(ev) {
-  const href = osmUrl(ev);
-  const name = ev.location.name || "Location not specified";
+function renderLocation(event) {
+  const href = osmUrl(event);
+  const name = event.location.name || "Location not specified";
   return [
     href
-      ? h("a", { href, target: "_blank", rel: "noopener noreferrer" }, name)
-      : h("span", null, name),
-    ev.location.address &&
-      h("span", { class: "detail__address muted" }, ev.location.address),
+      ? createElementTree(
+          "a",
+          { href, target: "_blank", rel: "noopener noreferrer" },
+          name,
+        )
+      : createElementTree("span", null, name),
+    event.location.address &&
+      createElementTree(
+        "span",
+        { class: "detail__address muted" },
+        event.location.address,
+      ),
   ];
 }
 
@@ -182,7 +212,7 @@ function renderLocation(ev) {
  * @returns {HTMLElement}
  */
 const renderGroup = (group) =>
-  h(
+  createElementTree(
     "span",
     {
       class: "detail__group",
@@ -193,16 +223,16 @@ const renderGroup = (group) =>
 
 /**
  * Host handle linked to their Bluesky profile.
- * @param {import('../lexicon/eventView.js').DisplayEvent} ev
+ * @param {import('../lexicon/eventView.js').DisplayEvent} event
  * @returns {HTMLElement|string}
  */
-function renderHost(ev) {
-  const label = ev.authorHandle
-    ? `@${ev.authorHandle}`
-    : ev.authorDid || "Unknown";
-  const href = blueskyProfileUrl(ev.authorHandle, ev.authorDid);
+function renderHost(event) {
+  const label = event.authorHandle
+    ? `@${event.authorHandle}`
+    : event.authorDid || "Unknown";
+  const href = blueskyProfileUrl(event.authorHandle, event.authorDid);
   return href
-    ? h(
+    ? createElementTree(
         "a",
         {
           href,
@@ -217,22 +247,22 @@ function renderHost(ev) {
 
 /**
  * Definition list of the key facts (when / where / group / host).
- * @param {import('../lexicon/eventView.js').DisplayEvent} ev
- * @param {DetailOpts} opts
+ * @param {import('../lexicon/eventView.js').DisplayEvent} event
+ * @param {DetailOpts} options
  * @returns {HTMLElement}
  */
-function renderFacts(ev, opts) {
+function renderFacts(event, options) {
   const fact = (term, ...value) => [
-    h("dt", null, term),
-    h("dd", null, ...value),
+    createElementTree("dt", null, term),
+    createElementTree("dd", null, ...value),
   ];
-  return h(
+  return createElementTree(
     "dl",
     { class: "detail__facts" },
-    fact("When", renderWhen(ev, opts)),
-    fact("Where", ...renderLocation(ev)),
-    ev.group && fact("Group", renderGroup(ev.group)),
-    fact("Host", renderHost(ev)),
+    fact("When", renderWhen(event, options)),
+    fact("Where", ...renderLocation(event)),
+    event.group && fact("Group", renderGroup(event.group)),
+    fact("Host", renderHost(event)),
   );
 }
 
@@ -243,24 +273,26 @@ function renderFacts(ev, opts) {
  */
 const renderTags = (tags) =>
   tags?.length
-    ? h(
+    ? createElementTree(
         "ul",
         { class: "chips detail__tags", "aria-label": "Tags" },
-        tags.map((tag) => h("li", { class: "chip chip--static" }, `#${tag}`)),
+        tags.map((tag) =>
+          createElementTree("li", { class: "chip chip--static" }, `#${tag}`),
+        ),
       )
     : null;
 
 /**
  * Subscribe slot (#19): the shared toggle (views/subscribeButton.js), or a disabled
  * placeholder when no handler is wired. Hidden for ended events unless already subscribed.
- * @param {object} ev EventView (handed to the handler, so the subscription gets its cid)
- * @param {ActionOpts} opts
+ * @param {object} event EventView (handed to the handler, so the subscription gets its cid)
+ * @param {ActionOpts} options
  * @returns {HTMLElement|null}
  */
-function renderSubscribe(ev, opts) {
-  if (opts.ended && !opts.subscribed) return null;
-  if (!opts.onToggleSubscribe)
-    return h(
+function renderSubscribe(event, options) {
+  if (options.ended && !options.subscribed) return null;
+  if (!options.onToggleSubscribe)
+    return createElementTree(
       "button",
       {
         type: "button",
@@ -270,10 +302,10 @@ function renderSubscribe(ev, opts) {
       },
       SUBSCRIBE_LABEL,
     );
-  return renderSubscribeButton(ev, {
-    subscribed: opts.subscribed,
-    ended: opts.ended,
-    onToggle: opts.onToggleSubscribe,
+  return renderSubscribeButton(event, {
+    subscribed: options.subscribed,
+    ended: options.ended,
+    onToggle: options.onToggleSubscribe,
     describedBy: PRIVACY_NOTE_ID,
   });
 }
@@ -284,7 +316,7 @@ function renderSubscribe(ev, opts) {
  * @returns {HTMLElement[]}
  */
 const renderStretchActions = () => [
-  h(
+  createElementTree(
     "button",
     {
       type: "button",
@@ -295,7 +327,7 @@ const renderStretchActions = () => [
     },
     "Get directions",
   ),
-  h(
+  createElementTree(
     "button",
     {
       type: "button",
@@ -310,30 +342,30 @@ const renderStretchActions = () => [
 
 /**
  * Host-only Edit / Delete slot (#9). Edit opens the existing compose modal in edit mode.
- * @param {object} ev
- * @param {ActionOpts} opts
+ * @param {object} event
+ * @param {ActionOpts} options
  * @returns {HTMLElement[]}
  */
-const renderHostActions = (ev, opts) =>
-  opts.canEdit
+const renderHostActions = (event, options) =>
+  options.canEdit
     ? [
-        h(
+        createElementTree(
           "button",
           {
             type: "button",
             class: "btn",
             dataset: { action: "edit" },
-            onclick: () => opts.onEdit?.(ev),
+            onclick: () => options.onEdit?.(event),
           },
           "Edit",
         ),
-        h(
+        createElementTree(
           "button",
           {
             type: "button",
             class: "btn btn--danger",
             dataset: { action: "delete" },
-            onclick: () => opts.onDelete?.(ev),
+            onclick: () => options.onDelete?.(event),
           },
           "Delete",
         ),
@@ -342,46 +374,47 @@ const renderHostActions = (ev, opts) =>
 
 /**
  * All action buttons for an event, in slot order.
- * @param {object} ev
- * @param {ActionOpts} [opts]
+ * @param {object} event
+ * @param {ActionOpts} [options]
  * @returns {HTMLElement[]}
  */
-export const renderActions = (ev, opts = {}) =>
+export const renderActions = (event, options = {}) =>
   [
-    renderSubscribe(ev, opts),
+    renderSubscribe(event, options),
     ...renderStretchActions(),
-    ...renderHostActions(ev, opts),
+    ...renderHostActions(event, options),
   ].filter(Boolean);
 
 /**
  * Announcements, newest first.
  * @param {{text: string, createdAt: string}[]} [updates]
- * @param {DetailOpts} opts
+ * @param {DetailOpts} options
  * @returns {HTMLElement}
  */
-function renderUpdates(updates = [], opts = {}) {
+function renderUpdates(updates = [], options = {}) {
   const sorted = [...updates].sort(
-    (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt),
+    (firstUpdate, secondUpdate) =>
+      Date.parse(secondUpdate.createdAt) - Date.parse(firstUpdate.createdAt),
   );
-  const items = sorted.map((update) =>
-    h(
+  const updateItems = sorted.map((update) =>
+    createElementTree(
       "li",
       null,
-      h(
+      createElementTree(
         "time",
         { datetime: update.createdAt, class: "muted" },
-        formatDateTime(update.createdAt, opts),
+        formatDateTime(update.createdAt, options),
       ),
-      h("p", null, update.text),
+      createElementTree("p", null, update.text),
     ),
   );
-  return h(
+  return createElementTree(
     "section",
     { class: "detail__section", "aria-labelledby": "detail-updates" },
-    h("h3", { id: "detail-updates" }, "Updates"),
-    items.length
-      ? h("ol", { class: "updates" }, items)
-      : h("p", { class: "muted" }, "No announcements yet."),
+    createElementTree("h3", { id: "detail-updates" }, "Updates"),
+    updateItems.length
+      ? createElementTree("ol", { class: "updates" }, updateItems)
+      : createElementTree("p", { class: "muted" }, "No announcements yet."),
   );
 }
 
@@ -390,15 +423,15 @@ function renderUpdates(updates = [], opts = {}) {
  * by the controller (the map needs Leaflet). Display fields come from the sanitized
  * display event; the action buttons receive the original EventView, so Edit / Delete
  * hand the host's real record to the compose modal.
- * @param {object} ev EventView & {updates}
- * @param {DetailOpts} [opts]
+ * @param {object} event EventView & {updates}
+ * @param {DetailOpts} [options]
  * @returns {HTMLElement}
  */
-export function renderDetail(ev, opts = {}) {
-  const view = toDisplayEvent(ev);
-  const source = safeHttpUrl(view.sourceUrl);
-  const ended = isEnded(view, opts.now);
-  return h(
+export function renderDetail(event, options = {}) {
+  const view = toDisplayEvent(event);
+  const sourceLink = safeHttpUrl(view.sourceUrl);
+  const ended = isEnded(view, options.now);
+  return createElementTree(
     "article",
     {
       class: "detail",
@@ -408,58 +441,62 @@ export function renderDetail(ev, opts = {}) {
         lexiconValid: String(view.issues.length === 0),
       },
     },
-    renderToolbar(opts, view.uri),
-    renderHeader(view, opts),
-    renderFacts(view, opts),
+    renderToolbar(options, view.uri),
+    renderHeader(view, options),
+    renderFacts(view, options),
     renderTags(view.tags),
-    h(
+    createElementTree(
       "div",
       { class: "detail__actions" },
-      renderActions(ev, { ...opts, ended }),
+      renderActions(event, { ...options, ended }),
     ),
-    opts.onToggleSubscribe && !ended && renderPrivacyNote(),
-    h("div", { class: "detail__map", "aria-label": "Event location map" }),
-    view.description && h("p", { class: "detail__desc" }, view.description),
-    source &&
-      h(
+    options.onToggleSubscribe && !ended && renderPrivacyNote(),
+    createElementTree("div", {
+      class: "detail__map",
+      "aria-label": "Event location map",
+    }),
+    view.description &&
+      createElementTree("p", { class: "detail__desc" }, view.description),
+    sourceLink &&
+      createElementTree(
         "p",
         null,
-        h(
+        createElementTree(
           "a",
-          { href: source, target: "_blank", rel: "noopener noreferrer" },
+          { href: sourceLink, target: "_blank", rel: "noopener noreferrer" },
           "Event page",
         ),
       ),
-    renderUpdates(view.updates, opts),
+    renderUpdates(view.updates, options),
   );
 }
 
 /**
  * Friendly page for unknown / deleted / malformed event links.
- * @param {{onClose?: () => void}} [opts]
+ * @param {{onClose?: () => void}} [options]
  * @returns {HTMLElement}
  */
-export const renderNotFound = (opts = {}) =>
-  h(
+export const renderNotFound = (options = {}) =>
+  createElementTree(
     "article",
     { class: "detail detail--missing", "aria-labelledby": "detail-title" },
-    renderToolbar(opts),
-    h(
+    renderToolbar(options),
+    createElementTree(
       "h2",
       { id: "detail-title", class: "detail__title", tabindex: "-1" },
       "Event not found",
     ),
-    h(
+    createElementTree(
       "p",
       null,
       "This event may have been deleted, or the link may be mistyped.",
     ),
-    h(
+    createElementTree(
       "button",
       {
         type: "button",
         class: "btn btn--primary",
-        onclick: () => opts.onClose?.(),
+        onclick: () => options.onClose?.(),
       },
       "Browse all events",
     ),
@@ -467,32 +504,36 @@ export const renderNotFound = (opts = {}) =>
 
 /**
  * Error page for failures other than "not found" (offline, server error).
- * @param {{onClose?: () => void, onRetry?: () => void}} opts
+ * @param {{onClose?: () => void, onRetry?: () => void}} options
  * @returns {HTMLElement}
  */
-const renderLoadError = (opts) =>
-  h(
+const renderLoadError = (options) =>
+  createElementTree(
     "article",
     { class: "detail detail--error", "aria-labelledby": "detail-title" },
-    renderToolbar(opts),
-    h(
+    renderToolbar(options),
+    createElementTree(
       "h2",
       { id: "detail-title", class: "detail__title", tabindex: "-1" },
       "Could not load this event",
     ),
-    h("p", { role: "alert" }, "Check your connection and try again."),
-    h(
+    createElementTree(
+      "p",
+      { role: "alert" },
+      "Check your connection and try again.",
+    ),
+    createElementTree(
       "button",
-      { type: "button", class: "btn", onclick: () => opts.onRetry?.() },
+      { type: "button", class: "btn", onclick: () => options.onRetry?.() },
       "Try again",
     ),
   );
 
 /**
  * @typedef {{api: {getEvent(uri: string): Promise<{data: object, stale: boolean}>},
- *   findEvent?: (uri: string) => object|null, canEdit?: (ev: object) => boolean,
- *   isSubscribed?: (uri: string) => boolean, onToggleSubscribe?: (ev: object) => void,
- *   onEdit?: (ev: object) => void, onDelete?: (ev: object) => void, onClose?: () => void,
+ *   findEvent?: (uri: string) => object|null, canEdit?: (event: object) => boolean,
+ *   isSubscribed?: (uri: string) => boolean, onToggleSubscribe?: (event: object) => void,
+ *   onEdit?: (event: object) => void, onDelete?: (event: object) => void, onClose?: () => void,
  *   onCopyLink?: (uri: string) => void, mapConfig?: import('../config.js').MapConfig,
  *   pinMapFactory?: (root: HTMLElement) => ReturnType<typeof createPinMap>,
  *   now?: () => Date, onInvalidRecord?: (uri: string,
@@ -523,31 +564,31 @@ const withRequestedUri = (eventView, requestedUri) =>
  * "Event not found" without a request. Records that break the lexicon are reported to
  * `onInvalidRecord` (default: console.warn) and still rendered best-effort.
  * @param {HTMLElement} root
- * @param {DetailDeps} deps
+ * @param {DetailDeps} dependencies
  * @returns {{open(uri: string|null): Promise<void>, close(): void, refreshActions(): void,
  *   readonly currentUri: string|null, readonly currentEvent: object|null}}
  */
-export function createDetailView(root, deps) {
+export function createDetailView(root, dependencies) {
   const {
     api,
     findEvent = () => null,
     pinMapFactory = (container) =>
-      createPinMap(container, { config: deps.mapConfig }),
+      createPinMap(container, { config: dependencies.mapConfig }),
     now = () => new Date(),
     onInvalidRecord = warnInvalidRecord,
-  } = deps;
-  let current = null; // {uri, event, stale}
+  } = dependencies;
+  let displayed = null; // {uri, event, stale}
   let pinMap = null;
   let loadSequence = 0;
 
   /** Per-render action options derived from the latest app state. */
-  const actionOpts = (ev) => ({
-    canEdit: Boolean(deps.canEdit?.(ev)),
-    subscribed: Boolean(deps.isSubscribed?.(ev.uri)),
-    ended: isEnded(ev, now()),
-    onToggleSubscribe: deps.onToggleSubscribe,
-    onEdit: deps.onEdit,
-    onDelete: deps.onDelete,
+  const actionOpts = (event) => ({
+    canEdit: Boolean(dependencies.canEdit?.(event)),
+    subscribed: Boolean(dependencies.isSubscribed?.(event.uri)),
+    ended: isEnded(event, now()),
+    onToggleSubscribe: dependencies.onToggleSubscribe,
+    onEdit: dependencies.onEdit,
+    onDelete: dependencies.onDelete,
   });
 
   /** Swap the pane content, releasing the old pin map; optionally focus the title. */
@@ -566,13 +607,13 @@ export function createDetailView(root, deps) {
 
   /** Render an event (and its pin map). */
   function showEvent(event, stale, options) {
-    current = { uri: event.uri, event, stale };
+    displayed = { uri: event.uri, event, stale };
     reportLexiconIssues(event);
     const article = renderDetail(event, {
       stale,
       now: now(),
-      onClose: deps.onClose,
-      onCopyLink: deps.onCopyLink,
+      onClose: dependencies.onClose,
+      onCopyLink: dependencies.onCopyLink,
       ...actionOpts(event),
     });
     mount(article, options);
@@ -583,23 +624,29 @@ export function createDetailView(root, deps) {
   }
 
   const showMissing = () => {
-    current = null;
-    mount(renderNotFound({ onClose: deps.onClose }));
+    displayed = null;
+    mount(renderNotFound({ onClose: dependencies.onClose }));
   };
 
   /** Apply the GET /api/event result (or failure) for the current open() call. */
-  function settle({ data, stale, error } = {}, uri, cached) {
+  function settle({ data: fetchedEvent, stale, error } = {}, uri, cached) {
     const notFound = NOT_FOUND_STATUSES.has(error?.status);
-    if (notFound || (!error && !isPlainObject(data))) return showMissing();
+    if (notFound || (!error && !isPlainObject(fetchedEvent)))
+      return showMissing();
     if (!error) {
       const focus = !cached || root.contains(document.activeElement);
-      return showEvent(withRequestedUri(data, uri), stale, { focus });
+      return showEvent(withRequestedUri(fetchedEvent, uri), stale, { focus });
     }
     if (cached)
       return showEvent(cached, true, {
         focus: root.contains(document.activeElement),
       });
-    mount(renderLoadError({ onClose: deps.onClose, onRetry: () => open(uri) }));
+    mount(
+      renderLoadError({
+        onClose: dependencies.onClose,
+        onRetry: () => open(uri),
+      }),
+    );
   }
 
   /**
@@ -610,12 +657,12 @@ export function createDetailView(root, deps) {
   async function open(uri) {
     const sequence = ++loadSequence;
     if (!isEventUri(uri)) return showMissing();
-    current = { uri, event: null, stale: false };
+    displayed = { uri, event: null, stale: false };
     const cached = findEvent(uri);
     if (cached) showEvent(cached, false, { focus: true });
     else
       mount(
-        h(
+        createElementTree(
           "p",
           {
             id: "detail-title",
@@ -638,10 +685,10 @@ export function createDetailView(root, deps) {
   /** Re-render only the action buttons (subscription / edit rights changed). */
   function refreshActions() {
     const slot = root.querySelector(".detail__actions");
-    if (!slot || !current?.event) return;
+    if (!slot || !displayed?.event) return;
     const focusedAction = document.activeElement?.dataset?.action;
     slot.replaceChildren(
-      ...renderActions(current.event, actionOpts(current.event)),
+      ...renderActions(displayed.event, actionOpts(displayed.event)),
     );
     if (focusedAction)
       slot.querySelector(`[data-action="${focusedAction}"]`)?.focus();
@@ -650,7 +697,7 @@ export function createDetailView(root, deps) {
   /** Clear the pane and cancel any in-flight load. */
   function close() {
     loadSequence++;
-    current = null;
+    displayed = null;
     pinMap?.destroy();
     pinMap = null;
     root.replaceChildren();
@@ -661,10 +708,10 @@ export function createDetailView(root, deps) {
     close,
     refreshActions,
     get currentUri() {
-      return current?.uri ?? null;
+      return displayed?.uri ?? null;
     },
     get currentEvent() {
-      return current?.event ?? null;
+      return displayed?.event ?? null;
     },
   };
 }

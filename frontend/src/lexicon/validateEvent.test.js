@@ -18,11 +18,14 @@ const fixturesDir = fileURLToPath(
 
 /** Reads every .json fixture in fixtures/event/<folder>/ as [fileName, data]. */
 function loadFixtures(folder) {
-  const dir = join(fixturesDir, folder);
-  return readdirSync(dir)
+  const fixtureFolder = join(fixturesDir, folder);
+  return readdirSync(fixtureFolder)
     .filter((file) => file.endsWith(".json"))
     .sort()
-    .map((file) => [file, JSON.parse(readFileSync(join(dir, file), "utf8"))]);
+    .map((file) => [
+      file,
+      JSON.parse(readFileSync(join(fixtureFolder, file), "utf8")),
+    ]);
 }
 
 const validFixtures = loadFixtures("valid");
@@ -46,9 +49,11 @@ describe("validateEvent: invalid fixtures", () => {
   it.each(invalidFixtures)("%s", (_file, fixture) => {
     const result = validateEvent(fixture.record);
     expect(result.ok).toBe(false);
-    const messages = result.errors.map((e) => e.message);
+    const messages = result.errors.map((issue) => issue.message);
     expect(
-      messages.some((m) => m.includes(fixture.expectedErrorContains)),
+      messages.some((message) =>
+        message.includes(fixture.expectedErrorContains),
+      ),
       `expected an error containing "${fixture.expectedErrorContains}", got: ${JSON.stringify(messages)}`,
     ).toBe(true);
   });

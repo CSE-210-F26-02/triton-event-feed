@@ -38,62 +38,64 @@ export function subscriptionErrorMessage(error) {
  * @property {() => boolean} isLoggedIn
  * @property {(request: import('./views/loginView.js').LoginRequest) => void} requestLogin
  * @property {(uri: string) => void} openEvent navigate to an event's detail page
- * @property {(message: string, opts?: {kind?: string}) => void} toast
+ * @property {(message: string, options?: {kind?: string}) => void} toast
  */
 
 /**
  * Run a subscription change, toasting the outcome; asks for notification permission
  * after a successful subscribe.
- * @param {SubscriptionControllerDeps} deps
+ * @param {SubscriptionControllerDeps} dependencies
  * @param {() => Promise<boolean>} change
  * @returns {Promise<boolean|null>} the new state, or null when it failed
  */
-async function attemptChange(deps, change) {
+async function attemptChange(dependencies, change) {
   try {
     const subscribed = await change();
-    deps.toast(subscribed ? SUBSCRIBED_TOAST : UNSUBSCRIBED_TOAST);
-    if (subscribed) deps.notifications?.askPermissionOnce();
+    dependencies.toast(subscribed ? SUBSCRIBED_TOAST : UNSUBSCRIBED_TOAST);
+    if (subscribed) dependencies.notifications?.askPermissionOnce();
     return subscribed;
   } catch (error) {
-    deps.toast(subscriptionErrorMessage(error), { kind: "error" });
+    dependencies.toast(subscriptionErrorMessage(error), { kind: "error" });
     return null;
   }
 }
 
 /**
  * Reload the user's subscriptions from their PDS, toasting a failure.
- * @param {SubscriptionControllerDeps} deps
+ * @param {SubscriptionControllerDeps} dependencies
  * @returns {Promise<boolean>} true on success
  */
-async function reloadSubscriptions(deps) {
+async function reloadSubscriptions(dependencies) {
   try {
-    await deps.subscriptions.load();
+    await dependencies.subscriptions.load();
     return true;
   } catch {
-    deps.toast(LOAD_FAILED_TOAST, { kind: "error" });
+    dependencies.toast(LOAD_FAILED_TOAST, { kind: "error" });
     return false;
   }
 }
 
 /**
  * After a login started by Subscribe: back to the event, then make sure it's on.
- * @param {SubscriptionControllerDeps} deps
+ * @param {SubscriptionControllerDeps} dependencies
  * @param {object} event EventView
  */
-async function subscribeAfterLogin(deps, event) {
-  deps.openEvent(event.uri);
-  if (!(await reloadSubscriptions(deps))) return;
-  if (deps.subscriptions.has(event.uri)) return;
-  await attemptChange(deps, () => deps.subscriptions.subscribe(event));
+async function subscribeAfterLogin(dependencies, event) {
+  dependencies.openEvent(event.uri);
+  if (!(await reloadSubscriptions(dependencies))) return;
+  if (dependencies.subscriptions.has(event.uri)) return;
+  await attemptChange(dependencies, () =>
+    dependencies.subscriptions.subscribe(event),
+  );
 }
 
 /**
  * Create the controller.
- * @param {SubscriptionControllerDeps} deps
+ * @param {SubscriptionControllerDeps} dependencies
  * @returns {{toggle(event: object): Promise<boolean|null>,
  *   unsubscribe(uri: string): Promise<boolean|null>, reload(): Promise<boolean>}}
  */
-export function createSubscriptionController(deps) {
+export function createSubscriptionController(dependencies) {
   return {
     /**
      * Subscribe button handler.
@@ -101,11 +103,13 @@ export function createSubscriptionController(deps) {
      * @returns {Promise<boolean|null>} new state; null when it failed or login is pending
      */
     async toggle(event) {
-      if (deps.isLoggedIn())
-        return attemptChange(deps, () => deps.subscriptions.toggle(event));
-      deps.requestLogin({
+      if (dependencies.isLoggedIn())
+        return attemptChange(dependencies, () =>
+          dependencies.subscriptions.toggle(event),
+        );
+      dependencies.requestLogin({
         reason: LOGIN_TO_SUBSCRIBE_REASON,
-        onLoggedIn: () => subscribeAfterLogin(deps, event),
+        onLoggedIn: () => subscribeAfterLogin(dependencies, event),
       });
       return null;
     },
@@ -115,10 +119,12 @@ export function createSubscriptionController(deps) {
      * @returns {Promise<boolean|null>}
      */
     unsubscribe: (uri) =>
-      deps.isLoggedIn()
-        ? attemptChange(deps, () => deps.subscriptions.unsubscribe(uri))
+      dependencies.isLoggedIn()
+        ? attemptChange(dependencies, () =>
+            dependencies.subscriptions.unsubscribe(uri),
+          )
         : Promise.resolve(null),
     /** Reload from the PDS. @returns {Promise<boolean>} */
-    reload: () => reloadSubscriptions(deps),
+    reload: () => reloadSubscriptions(dependencies),
   };
 }

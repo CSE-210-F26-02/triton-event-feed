@@ -22,3 +22,9 @@ dev = [
 # importable when pytest runs from inside backend/.
 pythonpath = [".."]
 testpaths = ["tests"]
+
+[tool.black]
+# Match flake8's default 79-character limit (CI runs both). With the same
+# limit, black wraps long lines in parentheses itself, so names never have
+# to be shortened to fit.
+line-length = 79

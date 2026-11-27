@@ -10,7 +10,7 @@ import {
 import { memoryStorage, testMockConfig } from "./helpers.js";
 
 /** Fake token prefixes, from the shared test env (frontend/.env in the app). */
-const TOKENS = (await testMockConfig()).pds;
+const TOKENS = (await testMockConfig()).tokenPrefixes;
 const PDS_ORIGIN = "https://pds.mock.test";
 
 const EVENT = {
@@ -60,12 +60,12 @@ describe("stubs/mockPds (the ?mock fake PDS, also usable by future e2e tests)", 
 
   it("keeps records in storage, so they survive a reload", async () => {
     const local = memoryStorage();
-    const first = writerOver(local);
-    await first.login("larry.test", "pw");
-    await first.createSubscription(buildSubscriptionRecord(EVENT));
-    const second = writerOver(local);
-    await second.login("larry.test", "pw");
-    expect(await second.listSubscriptions()).toHaveLength(1);
+    const firstWriter = writerOver(local);
+    await firstWriter.login("larry.test", "pw");
+    await firstWriter.createSubscription(buildSubscriptionRecord(EVENT));
+    const secondWriter = writerOver(local);
+    await secondWriter.login("larry.test", "pw");
+    expect(await secondWriter.listSubscriptions()).toHaveLength(1);
     expect(local.getItem(MOCK_PDS_STORAGE_KEY)).toContain(EVENT.uri);
   });
 
@@ -73,15 +73,15 @@ describe("stubs/mockPds (the ?mock fake PDS, also usable by future e2e tests)", 
     const local = memoryStorage();
     const writer = writerOver(local);
     await writer.login("larry.test", "pw");
-    for (let i = 0; i < 3; i++)
+    for (let index = 0; index < 3; index++)
       await writer.createSubscription(buildSubscriptionRecord(EVENT));
     const pdsFetch = createMockPdsFetch({ tokens: TOKENS, storage: local });
-    const did = mockDidForHandle("larry.test");
-    const res = await pdsFetch(
-      `https://pds.mock.test/xrpc/com.atproto.repo.listRecords?repo=${did}` +
+    const larryDid = mockDidForHandle("larry.test");
+    const response = await pdsFetch(
+      `https://pds.mock.test/xrpc/com.atproto.repo.listRecords?repo=${larryDid}` +
         "&collection=app.communitymap.subscription&limit=2",
     );
-    const page = await res.json();
+    const page = await response.json();
     expect(page.records).toHaveLength(2);
     expect(page.cursor).toBe("2");
     expect(await writer.listSubscriptions()).toHaveLength(3);
@@ -92,7 +92,7 @@ describe("stubs/mockPds (the ?mock fake PDS, also usable by future e2e tests)", 
       tokens: TOKENS,
       storage: memoryStorage(),
     });
-    const res = await pdsFetch(
+    const response = await pdsFetch(
       "https://pds.mock.test/xrpc/com.atproto.repo.createRecord",
       {
         method: "POST",
@@ -104,17 +104,17 @@ describe("stubs/mockPds (the ?mock fake PDS, also usable by future e2e tests)", 
         }),
       },
     );
-    expect(res.status).toBe(401);
+    expect(response.status).toBe(401);
   });
 
   it("answers unknown methods with 404 and survives corrupt storage", async () => {
     const local = memoryStorage();
     local.setItem(MOCK_PDS_STORAGE_KEY, "{not json");
     const pdsFetch = createMockPdsFetch({ tokens: TOKENS, storage: local });
-    const unknown = await pdsFetch(
+    const unknownMethodResponse = await pdsFetch(
       "https://pds.mock.test/xrpc/com.atproto.sync.getRepo",
     );
-    expect(unknown.status).toBe(404);
+    expect(unknownMethodResponse.status).toBe(404);
     const writer = writerOver(local);
     await writer.login("larry.test", "pw");
     expect(await writer.listSubscriptions()).toEqual([]);
@@ -125,17 +125,17 @@ describe("stubs/mockPds (the ?mock fake PDS, also usable by future e2e tests)", 
       tokens: TOKENS,
       storage: memoryStorage(),
     });
-    const res = await pdsFetch(
+    const response = await pdsFetch(
       `${PDS_ORIGIN}/xrpc/com.atproto.server.createSession`,
       {
         method: "POST",
         body: JSON.stringify({ identifier: "larry.test", password: "pw" }),
       },
     );
-    const did = mockDidForHandle("larry.test");
-    expect(await res.json()).toMatchObject({
-      accessJwt: `${TOKENS.accessTokenPrefix}${did}`,
-      refreshJwt: `${TOKENS.refreshTokenPrefix}${did}`,
+    const larryDid = mockDidForHandle("larry.test");
+    expect(await response.json()).toMatchObject({
+      accessJwt: `${TOKENS.accessTokenPrefix}${larryDid}`,
+      refreshJwt: `${TOKENS.refreshTokenPrefix}${larryDid}`,
     });
   });
 
@@ -149,14 +149,14 @@ describe("stubs/mockPds (the ?mock fake PDS, also usable by future e2e tests)", 
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
-    const ok = await refresh(`${TOKENS.refreshTokenPrefix}did:plc:x`);
-    expect((await ok.json()).did).toBe("did:plc:x");
-    for (const bad of [
+    const validRefresh = await refresh(`${TOKENS.refreshTokenPrefix}did:plc:x`);
+    expect((await validRefresh.json()).did).toBe("did:plc:x");
+    for (const invalidToken of [
       `${TOKENS.accessTokenPrefix}did:plc:x`,
       TOKENS.refreshTokenPrefix,
       "anything",
     ])
-      expect((await refresh(bad)).status).toBe(401);
+      expect((await refresh(invalidToken)).status).toBe(401);
   });
 
   it("refuses to start without token prefixes", () => {

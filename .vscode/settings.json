@@ -5,6 +5,7 @@
         "fastapi",
         "itertools",
         "Jetstream",
-        "uvicorn"
+        "uvicorn",
+        "Vitest"
     ]
 }

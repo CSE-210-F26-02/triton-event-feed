@@ -1,6 +1,6 @@
 /**
  * Hash-based routing so every event has a shareable URL that works on static hosting
- * (no server rewrites needed). Event routes look like `#/event/<did>/<rkey>`; the
+ * (no server rewrites needed). Event routes look like `#/event/<repo DID>/<record key>`; the
  * collection is always EVENT_NSID, so the AT URI can be rebuilt from the hash alone.
  * `#/subscriptions` is the signed-in user's "My subscriptions" page (#19).
  * Hashes that are not routes (e.g. the "#main" skip link) are ignored.
@@ -49,7 +49,7 @@ function decodeSegment(segment) {
 export function eventHash(eventUri) {
   const parsed = parseAtUri(eventUri);
   if (!parsed || parsed.collection !== EVENT_NSID) return null;
-  return `${EVENT_ROUTE_PREFIX}${encodeSegment(parsed.did)}/${encodeSegment(parsed.rkey)}`;
+  return `${EVENT_ROUTE_PREFIX}${encodeSegment(parsed.repoDid)}/${encodeSegment(parsed.recordKey)}`;
 }
 
 /**
@@ -63,10 +63,11 @@ export function parseHash(hash = "") {
   if (!hash.startsWith(EVENT_ROUTE_PREFIX)) return null;
   const segments = hash.slice(EVENT_ROUTE_PREFIX.length).split("/");
   if (segments.length !== 2) return { view: "event", uri: null };
-  const [did, rkey] = segments.map(decodeSegment);
-  const looksValid = did?.startsWith("did:") && rkey && !/[/?#\s]/.test(rkey);
+  const [repoDid, recordKey] = segments.map(decodeSegment);
+  const looksValid =
+    repoDid?.startsWith("did:") && recordKey && !/[/?#\s]/.test(recordKey);
   if (!looksValid) return { view: "event", uri: null };
-  return { view: "event", uri: `at://${did}/${EVENT_NSID}/${rkey}` };
+  return { view: "event", uri: `at://${repoDid}/${EVENT_NSID}/${recordKey}` };
 }
 
 /**
@@ -84,42 +85,46 @@ export function shareUrl(eventUri, location = globalThis.location) {
 
 /**
  * Create the router. Calls `onChange(route)` on start and on every route change.
- * @param {{onChange: (route: Route) => void, win?: Window}} deps
+ * @param {{onChange: (route: Route) => void, win?: Window}} dependencies
  * @returns {{start(): void, openEvent(uri: string): void, openSubscriptions(): void,
  *   home(): void, current(): Route}}
  */
-export function createRouter({ onChange, win = globalThis.window }) {
+export function createRouter({
+  onChange,
+  win: browserWindow = globalThis.window,
+}) {
   let route = { view: "list" };
 
   /** Re-read the hash; non-route hashes keep the current route. */
   const sync = () => {
-    const next = parseHash(win.location.hash);
-    if (!next) return;
-    route = next;
+    const nextRoute = parseHash(browserWindow.location.hash);
+    if (!nextRoute) return;
+    route = nextRoute;
     onChange(route);
   };
 
   return {
     start() {
-      win.addEventListener("hashchange", sync);
+      browserWindow.addEventListener("hashchange", sync);
       sync();
     },
     /** Navigate to an event (a no-op for URIs that are not events). */
     openEvent(uri) {
       const hash = eventHash(uri);
-      if (hash && win.location.hash !== hash) win.location.hash = hash;
+      if (hash && browserWindow.location.hash !== hash)
+        browserWindow.location.hash = hash;
       else if (hash) sync();
     },
     /** Navigate to "My subscriptions" (re-syncs when already there). */
     openSubscriptions() {
-      if (win.location.hash !== SUBSCRIPTIONS_ROUTE)
-        win.location.hash = SUBSCRIPTIONS_ROUTE;
+      if (browserWindow.location.hash !== SUBSCRIPTIONS_ROUTE)
+        browserWindow.location.hash = SUBSCRIPTIONS_ROUTE;
       else sync();
     },
     /** Navigate back to the list/map, leaving a clean URL (no trailing "#"). */
     home() {
-      const { pathname, search } = win.location;
-      win.history.pushState(null, "", `${pathname}${search}`);
+      const { pathname, search } = browserWindow.location;
+      browserWindow.history.pushState(null, "", `${pathname}${search}`);
       sync();
     },
     current: () => route,

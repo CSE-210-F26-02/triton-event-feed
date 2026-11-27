@@ -4,15 +4,15 @@ import { memoryStorage } from "./helpers.js";
 
 describe("cache", () => {
   it("round-trips values with savedAt", () => {
-    const c = createCache({ storage: memoryStorage(), now: () => 42 });
-    c.set("a", { x: 1 });
-    expect(c.get("a")).toEqual({ value: { x: 1 }, savedAt: 42 });
-    c.remove("a");
-    expect(c.get("a")).toBeNull();
+    const cache = createCache({ storage: memoryStorage(), now: () => 42 });
+    cache.set("a", { eventCount: 1 });
+    expect(cache.get("a")).toEqual({ value: { eventCount: 1 }, savedAt: 42 });
+    cache.remove("a");
+    expect(cache.get("a")).toBeNull();
   });
 
   it("never throws when storage throws", () => {
-    const bad = {
+    const failingStorage = {
       getItem() {
         throw new Error("denied");
       },
@@ -26,26 +26,26 @@ describe("cache", () => {
         throw new Error("x");
       },
     };
-    const c = createCache({ storage: bad });
-    expect(c.set("a", 1)).toBe(false);
-    expect(c.get("a")).toBeNull();
-    expect(() => c.clear()).not.toThrow();
+    const cache = createCache({ storage: failingStorage });
+    expect(cache.set("a", 1)).toBe(false);
+    expect(cache.get("a")).toBeNull();
+    expect(() => cache.clear()).not.toThrow();
   });
 
   it("works with null storage and ignores corrupt entries", () => {
     expect(createCache({ storage: null }).get("a")).toBeNull();
-    const s = memoryStorage();
-    s.setItem("cm:cache:a", "{not json");
-    expect(createCache({ storage: s }).get("a")).toBeNull();
+    const storage = memoryStorage();
+    storage.setItem("cm:cache:a", "{not json");
+    expect(createCache({ storage: storage }).get("a")).toBeNull();
   });
 
   it("clears only its own prefix", () => {
-    const s = memoryStorage();
-    s.setItem("other", "1");
-    const c = createCache({ storage: s });
-    c.set("a", 1);
-    c.clear();
-    expect(s.getItem("other")).toBe("1");
-    expect(c.get("a")).toBeNull();
+    const storage = memoryStorage();
+    storage.setItem("other", "1");
+    const cache = createCache({ storage: storage });
+    cache.set("a", 1);
+    cache.clear();
+    expect(storage.getItem("other")).toBe("1");
+    expect(cache.get("a")).toBeNull();
   });
 });

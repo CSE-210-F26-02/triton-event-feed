@@ -41,17 +41,19 @@ describe("renderCard", () => {
       "2026-11-11T19:00:00Z",
     );
     expect(card.querySelector("time").textContent).toBe("11:00 AM – 1:00 PM");
-    const a = card.querySelector(".card__loc a");
-    expect(a.href).toContain("openstreetmap.org/?mlat=32.8797&mlon=-117.2362");
-    expect(a.rel).toContain("noopener");
+    const locationLink = card.querySelector(".card__loc a");
+    expect(locationLink.href).toContain(
+      "openstreetmap.org/?mlat=32.8797&mlon=-117.2362",
+    );
+    expect(locationLink.rel).toContain("noopener");
     expect(card.textContent).toContain("Triton Eats");
     expect(
-      [...card.querySelectorAll(".chip")].map((c) => c.textContent),
+      [...card.querySelectorAll(".chip")].map((chip) => chip.textContent),
     ).toEqual(["#food", "#free"]);
-    const sub = card.querySelector("[aria-pressed]:not(.chip)");
-    expect(sub.textContent).toBe(SUBSCRIBE_LABEL);
-    expect(sub.dataset.action).toBe("subscribe");
-    expect(sub.title).toBe(SUBSCRIPTION_PRIVACY_NOTE);
+    const subscribeButton = card.querySelector("[aria-pressed]:not(.chip)");
+    expect(subscribeButton.textContent).toBe(SUBSCRIBE_LABEL);
+    expect(subscribeButton.dataset.action).toBe("subscribe");
+    expect(subscribeButton.title).toBe(SUBSCRIPTION_PRIVACY_NOTE);
   });
 
   it("falls back to address search when no coordinates", () => {
@@ -64,13 +66,13 @@ describe("renderCard", () => {
   });
 
   it("shows status badge, updated marker and subscribed state", () => {
-    const ev = sampleEvent({
+    const event = sampleEvent({
       status: "ending_soon",
       updatedAt: "2026-11-10T05:00:00Z",
     });
-    const card = renderCard(ev, { subscribed: new Set([ev.uri]) });
+    const card = renderCard(event, { subscribed: new Set([event.uri]) });
     const badges = [...card.querySelectorAll(".badge")].map(
-      (b) => b.textContent,
+      (badge) => badge.textContent,
     );
     expect(badges).toEqual(["Ending soon", "Updated"]);
     expect(card.querySelector(".btn").getAttribute("aria-pressed")).toBe(
@@ -95,8 +97,8 @@ describe("renderCard", () => {
     const onTagClick = vi.fn();
     const onOpen = vi.fn();
     const onToggleSubscribe = vi.fn();
-    const ev = sampleEvent();
-    const card = renderCard(ev, {
+    const event = sampleEvent();
+    const card = renderCard(event, {
       onTagClick,
       onOpen,
       onToggleSubscribe,
@@ -109,29 +111,31 @@ describe("renderCard", () => {
     card.querySelector("h3 button").click();
     card.querySelector(".card__actions button").click();
     expect(onTagClick).toHaveBeenCalledWith("food");
-    expect(onOpen).toHaveBeenCalledWith(ev.uri);
+    expect(onOpen).toHaveBeenCalledWith(event.uri);
     // The whole EventView is passed, so the subscription record can use its cid.
-    expect(onToggleSubscribe).toHaveBeenCalledWith(ev);
+    expect(onToggleSubscribe).toHaveBeenCalledWith(event);
   });
 
   it("hides Subscribe on ended events, but keeps Subscribed ✓ so you can unsubscribe", () => {
-    const ev = sampleEvent();
+    const event = sampleEvent();
     expect(
-      renderCard(ev, { now: AFTER_SAMPLE_ENDS }).querySelector(
+      renderCard(event, { now: AFTER_SAMPLE_ENDS }).querySelector(
         "[data-action=subscribe]",
       ),
     ).toBeNull();
-    const subscribed = renderCard(ev, {
+    const subscribed = renderCard(event, {
       now: AFTER_SAMPLE_ENDS,
-      subscribed: new Set([ev.uri]),
+      subscribed: new Set([event.uri]),
     }).querySelector("[data-action=subscribe]");
     expect(subscribed.textContent).toBe(SUBSCRIBED_LABEL);
   });
 
   it("prefixes title ids so the same event can appear twice on a page", () => {
-    const ev = sampleEvent();
-    const feedId = renderCard(ev).querySelector("h3").id;
-    const otherId = renderCard(ev, { idPrefix: "sub" }).querySelector("h3").id;
+    const event = sampleEvent();
+    const feedId = renderCard(event).querySelector("h3").id;
+    const otherId = renderCard(event, { idPrefix: "sub" }).querySelector(
+      "h3",
+    ).id;
     expect(feedId).toMatch(/^ev-/);
     expect(otherId).toMatch(/^sub-/);
     expect(otherId).not.toBe(feedId);
@@ -145,23 +149,22 @@ describe("createListView", () => {
     root = document.getElementById("r");
   });
   const now = new Date(2026, 10, 11, 8);
-  const ev = (i, day) =>
+  const makeEvent = (eventNumber, day) =>
     sampleEvent({
-      uri: `at://d/c/${i}`,
-      name: `E${i}`,
+      uri: `at://d/c/${eventNumber}`,
+      name: `E${eventNumber}`,
       startsAt: new Date(2026, 10, day, 10).toISOString(),
       endsAt: new Date(2026, 10, day, 11).toISOString(),
     });
 
   it("groups cards by day with headings", () => {
     createListView(root, { IntersectionObserverImpl: null }).render({
-      events: [ev(1, 11), ev(2, 12), ev(3, 12)],
+      events: [makeEvent(1, 11), makeEvent(2, 12), makeEvent(3, 12)],
       now,
     });
-    expect([...root.querySelectorAll("h2")].map((x) => x.textContent)).toEqual([
-      "Today",
-      "Tomorrow",
-    ]);
+    expect(
+      [...root.querySelectorAll("h2")].map((heading) => heading.textContent),
+    ).toEqual(["Today", "Tomorrow"]);
     expect(
       root.querySelectorAll("section")[1].querySelectorAll("article"),
     ).toHaveLength(2);
@@ -176,49 +179,59 @@ describe("createListView", () => {
   });
 
   it("shows the stale/offline banner and errors", () => {
-    const v = createListView(root, { IntersectionObserverImpl: null });
-    v.render({ events: [ev(1, 11)], stale: true, savedAt: Date.now(), now });
+    const listView = createListView(root, { IntersectionObserverImpl: null });
+    listView.render({
+      events: [makeEvent(1, 11)],
+      stale: true,
+      savedAt: Date.now(),
+      now,
+    });
     expect(root.querySelector(".notice--stale").textContent).toMatch(/offline/);
-    v.render({ events: [], error: "Boom", now });
+    listView.render({ events: [], error: "Boom", now });
     expect(root.querySelector("[role=alert]").textContent).toBe("Boom");
     expect(root.querySelector(".empty")).toBeNull();
   });
 
   it("Load more button and IntersectionObserver call onLoadMore (not while loading)", () => {
-    let cb;
+    let observerCallback;
     const observe = vi.fn();
-    class IO {
-      constructor(fn) {
-        cb = fn;
+    class FakeIntersectionObserver {
+      constructor(callback) {
+        observerCallback = callback;
       }
-      observe(el) {
-        observe(el);
+      observe(observedElement) {
+        observe(observedElement);
       }
       disconnect() {}
     }
     const onLoadMore = vi.fn();
-    const v = createListView(root, {
+    const listView = createListView(root, {
       onLoadMore,
-      IntersectionObserverImpl: IO,
+      IntersectionObserverImpl: FakeIntersectionObserver,
     });
-    v.render({ events: [ev(1, 11)], hasMore: true, now });
-    const btn = root.querySelector(".load-more");
-    expect(observe).toHaveBeenCalledWith(btn);
-    btn.click();
-    cb([{ isIntersecting: true }]);
+    listView.render({ events: [makeEvent(1, 11)], hasMore: true, now });
+    const button = root.querySelector(".load-more");
+    expect(observe).toHaveBeenCalledWith(button);
+    button.click();
+    observerCallback([{ isIntersecting: true }]);
     expect(onLoadMore).toHaveBeenCalledTimes(2);
-    v.render({ events: [ev(1, 11)], hasMore: true, loading: true, now });
-    cb([{ isIntersecting: true }]);
+    listView.render({
+      events: [makeEvent(1, 11)],
+      hasMore: true,
+      loading: true,
+      now,
+    });
+    observerCallback([{ isIntersecting: true }]);
     expect(onLoadMore).toHaveBeenCalledTimes(2);
     expect(root.querySelector(".load-more").disabled).toBe(true);
   });
 
   it("restores focus to the same control after re-render", () => {
-    const v = createListView(root, { IntersectionObserverImpl: null });
-    const e = ev(1, 11);
-    v.render({ events: [e], now });
+    const listView = createListView(root, { IntersectionObserverImpl: null });
+    const event = makeEvent(1, 11);
+    listView.render({ events: [event], now });
     root.querySelector(".card__actions button").focus();
-    v.render({ events: [e], subscribed: new Set([e.uri]), now });
+    listView.render({ events: [event], subscribed: new Set([event.uri]), now });
     expect(document.activeElement.textContent).toBe(SUBSCRIBED_LABEL);
   });
 });

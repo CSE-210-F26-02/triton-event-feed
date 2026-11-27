@@ -16,7 +16,7 @@ globalThis.__CM_NO_AUTOSTART__ = true;
 const { start } = await import("../src/app.js");
 
 const html = readFileSync(resolve(__dirname, "../index.html"), "utf8");
-const flush = () => new Promise((r) => setTimeout(r, 0));
+const flush = () => new Promise((resolveFlush) => setTimeout(resolveFlush, 0));
 
 function routes(url) {
   const path = url.split("?")[0];
@@ -80,10 +80,10 @@ describe("app (smoke)", () => {
       marker: vi.fn(() => marker),
     };
     vi.stubGlobal("L", leaflet);
-    const f = vi.fn(async (url) =>
+    const fetchMock = vi.fn(async (url) =>
       jsonResponse(routes(url) ?? { error: "nf" }, routes(url) ? 200 : 404),
     );
-    vi.stubGlobal("fetch", f);
+    vi.stubGlobal("fetch", fetchMock);
     await start({ config: await testConfig() });
     await flush();
     await flush();
@@ -96,13 +96,15 @@ describe("app (smoke)", () => {
       "New event",
     );
     // Location is never sent to the backend.
-    expect(f.mock.calls.every(([u]) => !/lat|lng|near/i.test(u))).toBe(true);
+    expect(
+      fetchMock.mock.calls.every(([url]) => !/lat|lng|near/i.test(url)),
+    ).toBe(true);
 
     document.querySelector("#filters .chip").click();
     await flush();
     expect(
-      f.mock.calls.some(
-        ([u]) => u.startsWith("/api/events?") && u.includes("tag=food"),
+      fetchMock.mock.calls.some(
+        ([url]) => url.startsWith("/api/events?") && url.includes("tag=food"),
       ),
     ).toBe(true);
 
@@ -138,7 +140,7 @@ describe("app (smoke)", () => {
       startsAt: tomorrow.toISOString(),
       endsAt: new Date(+tomorrow + 3600e3).toISOString(),
     });
-    f.mockImplementation(async (url) => {
+    fetchMock.mockImplementation(async (url) => {
       if (url.startsWith("/api/events?"))
         return jsonResponse(
           url.includes("cursor=page2")
@@ -150,13 +152,13 @@ describe("app (smoke)", () => {
     document.querySelector(".date-filter__trigger").click();
     document.querySelector(`[data-date="${dayKey(today)}"]`).click();
     [...document.querySelectorAll("#event-date-picker button")]
-      .find((b) => b.textContent === "Apply")
+      .find((button) => button.textContent === "Apply")
       .click();
     await flush();
     await flush();
-    expect(f.mock.calls.some(([url]) => url.includes("cursor=page2"))).toBe(
-      true,
-    );
+    expect(
+      fetchMock.mock.calls.some(([url]) => url.includes("cursor=page2")),
+    ).toBe(true);
     expect(document.querySelector("#list").textContent).toContain(
       "Selected day event",
     );
@@ -198,7 +200,7 @@ describe("app (smoke)", () => {
       "@alice.test",
     );
     expect(
-      fetchMock.mock.calls.some(([u]) => u.startsWith("/api/event?")),
+      fetchMock.mock.calls.some(([url]) => url.startsWith("/api/event?")),
     ).toBe(true);
 
     // Subscribing while logged out asks the user to log in first (#19).
@@ -218,7 +220,7 @@ describe("app (smoke)", () => {
 
     // Back → map returns and the URL is clean.
     [...detailPanel.querySelectorAll("button")]
-      .find((b) => b.textContent.includes("Back"))
+      .find((button) => button.textContent.includes("Back"))
       .click();
     await flush();
     expect(location.hash).toBe("");
@@ -255,7 +257,7 @@ describe("app (smoke)", () => {
     title: panel.querySelector("#detail-title").textContent,
     location: panel.querySelector(".detail__facts").textContent,
     tags: [...panel.querySelectorAll(".detail__tags li")].map(
-      (li) => li.textContent,
+      (listItem) => listItem.textContent,
     ),
     host: panel.querySelector(".detail__host").textContent,
     group: panel.querySelector(".detail__group").textContent,
@@ -300,8 +302,8 @@ describe("app (smoke)", () => {
     expect(panel.hidden).toBe(false);
     expect(detailFacts(panel)).toEqual(fromFeed);
     expect(
-      fetchMock.mock.calls.some(([u]) =>
-        u.startsWith(`/api/event?uri=${encodeURIComponent(event.uri)}`),
+      fetchMock.mock.calls.some(([url]) =>
+        url.startsWith(`/api/event?uri=${encodeURIComponent(event.uri)}`),
       ),
     ).toBe(true);
   });
@@ -333,7 +335,7 @@ async function bootApp(extraRoute = () => null, { initialUrl = "/" } = {}) {
   );
   vi.stubGlobal("localStorage", memoryStorage());
   vi.stubGlobal("sessionStorage", memoryStorage());
-  const chain = () => ({
+  const fakeLayer = () => ({
     addTo() {
       return this;
     },
@@ -349,15 +351,15 @@ async function bootApp(extraRoute = () => null, { initialUrl = "/" } = {}) {
     remove() {},
   });
   vi.stubGlobal("L", {
-    map: vi.fn(chain),
-    tileLayer: vi.fn(chain),
-    layerGroup: vi.fn(chain),
-    marker: vi.fn(chain),
+    map: vi.fn(fakeLayer),
+    tileLayer: vi.fn(fakeLayer),
+    layerGroup: vi.fn(fakeLayer),
+    marker: vi.fn(fakeLayer),
   });
-  const fetchMock = vi.fn(async (url, init) => {
-    const extra = extraRoute(url);
-    if (extra) return extra;
-    if (url.startsWith("/api/subscriptions") && init?.method === "POST")
+  const fetchMock = vi.fn(async (url, requestInit) => {
+    const overrideResponse = extraRoute(url);
+    if (overrideResponse) return overrideResponse;
+    if (url.startsWith("/api/subscriptions") && requestInit?.method === "POST")
       return jsonResponse({ ok: true });
     const body = routes(url);
     return jsonResponse(body ?? { error: "nf" }, body ? 200 : 404);

@@ -116,10 +116,9 @@ def test_rejects_bad_ports(value):
     assert problems[0].startswith("API_PORT must be a port number")
 
 
-BAD_ORIGINS = ["localhost:3000", "ftp://x.edu", ",", "*,x"]
-
-
-@pytest.mark.parametrize("value", BAD_ORIGINS)
+@pytest.mark.parametrize(
+    "value", ["localhost:3000", "ftp://x.edu", ",", "*,x"]
+)
 def test_rejects_bad_origins(value):
     problems = problems_for(env(DEV_CORS_ORIGINS=value))
     assert problems[0].startswith("DEV_CORS_ORIGINS must be")
@@ -138,7 +137,9 @@ def test_error_message_names_every_problem_and_the_example_file():
     assert "API_PORT" in message and "LOG_LEVEL" in message
 
 
-def test_load_env_file_keeps_real_environment(tmp_path, monkeypatch):
+def test_load_env_file_does_not_override_real_environment(
+    tmp_path, monkeypatch
+):
     env_file = tmp_path / ".env"
     env_file.write_text("API_HOST=0.0.0.0\nAPI_PORT=9000\n", encoding="utf-8")
     monkeypatch.setenv("API_HOST", "127.0.0.1")

@@ -25,32 +25,39 @@ const NOTIFICATION_TITLE = "Community Map";
 /**
  * Pure catch-up merge: keep notifications newer than `lastId`, sorted by id, deduped.
  * @param {number|null} lastId
- * @param {{id: number}[]} list
+ * @param {{id: number}[]} received
  * @returns {{fresh: object[], lastId: number|null}}
  */
-export function mergeNotifications(lastId, list) {
+export function mergeNotifications(lastId, received) {
   const seen = new Set();
-  const fresh = (Array.isArray(list) ? list : [])
+  const fresh = (Array.isArray(received) ? received : [])
     .filter(
-      (n) => typeof n?.id === "number" && (lastId == null || n.id > lastId),
+      (notification) =>
+        typeof notification?.id === "number" &&
+        (lastId == null || notification.id > lastId),
     )
-    .filter((n) => !seen.has(n.id) && seen.add(n.id))
-    .sort((a, b) => a.id - b.id);
-  const next = fresh.length ? fresh[fresh.length - 1].id : lastId;
-  return { fresh, lastId: next };
+    .filter(
+      (notification) => !seen.has(notification.id) && seen.add(notification.id),
+    )
+    .sort(
+      (firstNotification, secondNotification) =>
+        firstNotification.id - secondNotification.id,
+    );
+  const newestId = fresh.length ? fresh[fresh.length - 1].id : lastId;
+  return { fresh, lastId: newestId };
 }
 
 /**
  * Backoff delay for reconnect attempt `n` (0-based): 1s, 2s, 4s… capped.
- * @param {number} n @param {number} [baseMs] @param {number} [maxMs]
+ * @param {number} attempt @param {number} [baseMs] @param {number} [maxMs]
  * @returns {number}
  */
 export function backoffMs(
-  n,
+  attempt,
   baseMs = DEFAULT_BASE_DELAY_MS,
   maxMs = MAX_BACKOFF_MS,
 ) {
-  return Math.min(maxMs, baseMs * 2 ** n);
+  return Math.min(maxMs, baseMs * 2 ** attempt);
 }
 
 /**
@@ -59,15 +66,15 @@ export function backoffMs(
  * @returns {number|null}
  */
 function parseLastId(value) {
-  const n = value == null ? NaN : Number(value);
-  return Number.isFinite(n) ? n : null;
+  const parsedNumber = value == null ? NaN : Number(value);
+  return Number.isFinite(parsedNumber) ? parsedNumber : null;
 }
 
 /**
  * Show one notification: a toast, plus a system notification when the tab is hidden and
  * permission was granted.
  * @param {{id: number, message: string}} notification
- * @param {{toast: (msg: string) => void, NotificationImpl: typeof Notification|null}} deps
+ * @param {{toast: (message: string) => void, NotificationImpl: typeof Notification|null}} dependencies
  */
 function showNotification(notification, { toast, NotificationImpl }) {
   toast(notification.message);
@@ -89,7 +96,7 @@ function showNotification(notification, { toast, NotificationImpl }) {
  * @param {{api: {notifications(id: string, since: number|null): Promise<{data: any}>,
  *   notificationStreamUrl(id: string): string}, storage?: Storage|null,
  *   EventSourceImpl?: typeof EventSource|null, NotificationImpl?: typeof Notification|null,
- *   toast?: (msg: string) => void, onNotification?: (n: object) => void,
+ *   toast?: (message: string) => void, onNotification?: (notification: object) => void,
  *   baseDelayMs?: number}} opts
  * @returns {{watch(subscriberId: string|null): void, reconnectNow(): void,
  *   catchUp(): Promise<void>, askPermissionOnce(): Promise<void>, disconnect(): void,
@@ -106,7 +113,7 @@ export function createNotifications({
 }) {
   let subscriberId = null;
   let lastId = null;
-  let source = null;
+  let eventSource = null;
   let attempts = 0;
   let timer = null;
 
@@ -117,12 +124,12 @@ export function createNotifications({
     storageSet(storage, lastKey(), id == null ? null : String(id));
   }
 
-  function handle(list) {
-    const { fresh, lastId: next } = mergeNotifications(lastId, list);
-    setLast(next);
-    fresh.forEach((n) => {
-      showNotification(n, { toast, NotificationImpl });
-      onNotification(n);
+  function deliverNotifications(received) {
+    const { fresh, lastId: newestId } = mergeNotifications(lastId, received);
+    setLast(newestId);
+    fresh.forEach((notification) => {
+      showNotification(notification, { toast, NotificationImpl });
+      onNotification(notification);
     });
   }
 
@@ -130,30 +137,34 @@ export function createNotifications({
   async function catchUp() {
     if (!subscriberId) return;
     try {
-      const { data } = await api.notifications(subscriberId, lastId);
-      if (lastId == null) setLast(mergeNotifications(null, data).lastId ?? 0);
-      else handle(data);
+      const { data: missedNotifications } = await api.notifications(
+        subscriberId,
+        lastId,
+      );
+      if (lastId == null)
+        setLast(mergeNotifications(null, missedNotifications).lastId ?? 0);
+      else deliverNotifications(missedNotifications);
     } catch {
       /* offline (or STUB: endpoint missing); the next reconnect retries */
     }
   }
 
   function connect() {
-    if (!EventSourceImpl || source || !subscriberId) return;
+    if (!EventSourceImpl || eventSource || !subscriberId) return;
     clearTimeout(timer);
-    source = new EventSourceImpl(api.notificationStreamUrl(subscriberId));
-    source.onopen = () => {
+    eventSource = new EventSourceImpl(api.notificationStreamUrl(subscriberId));
+    eventSource.onopen = () => {
       attempts = 0;
       catchUp();
     };
-    source.onmessage = (ev) => {
+    eventSource.onmessage = (event) => {
       try {
-        handle([JSON.parse(ev.data)]);
+        deliverNotifications([JSON.parse(event.data)]);
       } catch {
         /* ignore malformed message */
       }
     };
-    source.onerror = () => {
+    eventSource.onerror = () => {
       disconnect();
       timer = setTimeout(connect, backoffMs(attempts++, baseDelayMs));
     };
@@ -161,8 +172,8 @@ export function createNotifications({
 
   function disconnect() {
     clearTimeout(timer);
-    if (source) source.close();
-    source = null;
+    if (eventSource) eventSource.close();
+    eventSource = null;
   }
 
   /**
@@ -170,12 +181,15 @@ export function createNotifications({
    * @param {string|null} id the subscriber's DID
    */
   function watch(id) {
-    const next = typeof id === "string" && id ? id : null;
-    if (next === subscriberId) return next ? connect() : undefined;
+    const nextSubscriberId = typeof id === "string" && id ? id : null;
+    if (nextSubscriberId === subscriberId)
+      return nextSubscriberId ? connect() : undefined;
     disconnect();
-    subscriberId = next;
+    subscriberId = nextSubscriberId;
     attempts = 0;
-    lastId = next ? parseLastId(storageGet(storage, lastKey())) : null;
+    lastId = nextSubscriberId
+      ? parseLastId(storageGet(storage, lastKey()))
+      : null;
     connect();
   }
 

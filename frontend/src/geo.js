@@ -4,7 +4,7 @@
  */
 
 /**
- * @param {{geolocation?: Geolocation|null, timeoutMs?: number}} [opts]
+ * @param {{geolocation?: Geolocation|null, timeoutMs?: number}} [options]
  */
 export function createGeo({
   geolocation = globalThis.navigator?.geolocation ?? null,
@@ -33,12 +33,15 @@ export function createGeo({
         );
       return new Promise((resolve, reject) => {
         geolocation.getCurrentPosition(
-          (p) => {
-            position = { lat: p.coords.latitude, lng: p.coords.longitude };
+          (browserPosition) => {
+            position = {
+              lat: browserPosition.coords.latitude,
+              lng: browserPosition.coords.longitude,
+            };
             resolve(position);
           },
-          (err) =>
-            reject(new Error(err?.message || "Could not get your location")),
+          (error) =>
+            reject(new Error(error?.message || "Could not get your location")),
           { enableHighAccuracy: false, maximumAge: 60000, timeout: timeoutMs },
         );
       });

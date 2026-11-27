@@ -89,8 +89,8 @@ function checkCoordinate(value, field, min, max) {
   if (typeof value !== "string" || !DECIMAL_RE.test(value)) {
     return { path, message: `${field} must be a decimal number` };
   }
-  const n = Number(value);
-  if (n < min || n > max) {
+  const degrees = Number(value);
+  if (degrees < min || degrees > max) {
     return { path, message: `${field} must be between ${min} and ${max}` };
   }
   return null;

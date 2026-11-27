@@ -17,8 +17,9 @@ describe("router.eventHash / parseHash", () => {
   });
 
   it("round-trips, including DIDs that need escaping", () => {
-    const webDid = "at://did:web:example.com%3A8080/app.communitymap.event/r1";
-    for (const uri of [EVENT_URI, webDid])
+    const didWebEventUri =
+      "at://did:web:example.com%3A8080/app.communitymap.event/r1";
+    for (const uri of [EVENT_URI, didWebEventUri])
       expect(parseHash(eventHash(uri))).toEqual({ view: "event", uri });
   });
 
@@ -58,8 +59,8 @@ describe("router.eventHash / parseHash", () => {
 describe("router.createRouter", () => {
   /** Minimal window stand-in with hashchange support. */
   function fakeWindow(hash = "") {
-    const target = new EventTarget();
-    const win = {
+    const hashChangeTarget = new EventTarget();
+    const browserWindow = {
       location: {
         pathname: "/",
         search: "",
@@ -68,24 +69,25 @@ describe("router.createRouter", () => {
         },
         set hash(value) {
           hash = value;
-          target.dispatchEvent(new Event("hashchange"));
+          hashChangeTarget.dispatchEvent(new Event("hashchange"));
         },
       },
       history: {
         pushState: vi.fn(
-          (_s, _t, url) =>
+          (_state, _title, url) =>
             (hash = url.split("#")[1] ? `#${url.split("#")[1]}` : ""),
         ),
       },
-      addEventListener: (type, fn) => target.addEventListener(type, fn),
+      addEventListener: (type, listener) =>
+        hashChangeTarget.addEventListener(type, listener),
     };
-    return win;
+    return browserWindow;
   }
 
   it("emits the initial route, event navigations and home", () => {
     const onChange = vi.fn();
-    const win = fakeWindow(eventHash(EVENT_URI));
-    const router = createRouter({ onChange, win });
+    const browserWindow = fakeWindow(eventHash(EVENT_URI));
+    const router = createRouter({ onChange, win: browserWindow });
     router.start();
     expect(onChange).toHaveBeenLastCalledWith({
       view: "event",
@@ -93,33 +95,33 @@ describe("router.createRouter", () => {
     });
 
     router.home();
-    expect(win.history.pushState).toHaveBeenCalledWith(null, "", "/");
+    expect(browserWindow.history.pushState).toHaveBeenCalledWith(null, "", "/");
     expect(onChange).toHaveBeenLastCalledWith({ view: "list" });
 
     router.openEvent(EVENT_URI);
-    expect(win.location.hash).toBe("#/event/did:plc:abc/3kabc");
+    expect(browserWindow.location.hash).toBe("#/event/did:plc:abc/3kabc");
     expect(router.current()).toEqual({ view: "event", uri: EVENT_URI });
   });
 
   it("keeps the current route when a non-route hash appears", () => {
     const onChange = vi.fn();
-    const win = fakeWindow(eventHash(EVENT_URI));
-    const router = createRouter({ onChange, win });
+    const browserWindow = fakeWindow(eventHash(EVENT_URI));
+    const router = createRouter({ onChange, win: browserWindow });
     router.start();
-    win.location.hash = "#main";
+    browserWindow.location.hash = "#main";
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(router.current().view).toBe("event");
   });
 
   it("routes #/subscriptions to My subscriptions (#19)", () => {
     const onChange = vi.fn();
-    const win = fakeWindow(SUBSCRIPTIONS_ROUTE);
-    const router = createRouter({ onChange, win });
+    const browserWindow = fakeWindow(SUBSCRIPTIONS_ROUTE);
+    const router = createRouter({ onChange, win: browserWindow });
     router.start();
     expect(onChange).toHaveBeenLastCalledWith({ view: "subscriptions" });
     router.home();
     router.openSubscriptions();
-    expect(win.location.hash).toBe(SUBSCRIPTIONS_ROUTE);
+    expect(browserWindow.location.hash).toBe(SUBSCRIPTIONS_ROUTE);
     expect(router.current()).toEqual({ view: "subscriptions" });
     const calls = onChange.mock.calls.length;
     router.openSubscriptions(); // already there: re-syncs instead of a no-op

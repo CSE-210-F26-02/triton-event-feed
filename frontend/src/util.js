@@ -6,32 +6,34 @@
 /**
  * Debounce a function.
  * @template {(...a: any[]) => void} F
- * @param {F} fn
- * @param {number} ms
+ * @param {F} callback
+ * @param {number} delayMs
  * @returns {F & {cancel: () => void}}
  */
-export function debounce(fn, ms) {
-  let t;
-  const wrapped = (...args) => {
-    clearTimeout(t);
-    t = setTimeout(() => fn(...args), ms);
+export function debounce(callback, delayMs) {
+  let timer;
+  const debounced = (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => callback(...args), delayMs);
   };
-  wrapped.cancel = () => clearTimeout(t);
-  return wrapped;
+  debounced.cancel = () => clearTimeout(timer);
+  return debounced;
 }
 
 /**
  * Random lowercase base32-ish id (uses crypto when available).
- * @param {number} [len=16]
+ * @param {number} [length=16]
  * @returns {string}
  */
-export function randomId(len = 16) {
+export function randomId(length = 16) {
   const alphabet = "abcdefghijklmnopqrstuvwxyz234567";
-  const bytes = new Uint8Array(len);
+  const bytes = new Uint8Array(length);
   if (globalThis.crypto?.getRandomValues)
     globalThis.crypto.getRandomValues(bytes);
-  else for (let i = 0; i < len; i++) bytes[i] = Math.floor(Math.random() * 256);
-  return Array.from(bytes, (b) => alphabet[b % 32]).join("");
+  else
+    for (let index = 0; index < length; index++)
+      bytes[index] = Math.floor(Math.random() * 256);
+  return Array.from(bytes, (randomByte) => alphabet[randomByte % 32]).join("");
 }
 
 /**

@@ -5,8 +5,8 @@
 
 /**
  * @template T
- * @typedef {{get(): T, set(patch: Partial<T> | ((s: T) => Partial<T>)): void,
- *            subscribe(fn: (state: T, prev: T) => void): () => void}} Store
+ * @typedef {{get(): T, set(patch: Partial<T> | ((state: T) => Partial<T>)): void,
+ *            subscribe(listener: (state: T, previousState: T) => void): () => void}} Store
  */
 
 /**
@@ -22,14 +22,15 @@ export function createStore(initial) {
   return {
     get: () => state,
     set(patch) {
-      const prev = state;
-      const delta = typeof patch === "function" ? patch(prev) : patch;
-      state = { ...prev, ...delta };
-      for (const fn of [...listeners]) fn(state, prev);
+      const previousState = state;
+      const stateChanges =
+        typeof patch === "function" ? patch(previousState) : patch;
+      state = { ...previousState, ...stateChanges };
+      for (const listener of [...listeners]) listener(state, previousState);
     },
-    subscribe(fn) {
-      listeners.add(fn);
-      return () => listeners.delete(fn);
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
     },
   };
 }

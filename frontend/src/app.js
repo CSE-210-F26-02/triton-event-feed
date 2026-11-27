@@ -6,7 +6,7 @@ import { createApi } from "./api.js";
 import { createAtprotoWriter } from "./atproto.js";
 import { loadConfig, loadMockConfig } from "./config.js";
 import { createDevWriter } from "./devWriter.js";
-import { h } from "./dom.js";
+import { createElementTree } from "./dom.js";
 import {
   EMPTY_FILTERS,
   buildEventQuery,
@@ -30,7 +30,7 @@ import { createLoginView } from "./views/loginView.js";
 import { createMapView } from "./views/mapView.js";
 import { createSubscriptionsView } from "./views/subscriptionsView.js";
 
-const $ = (sel) => document.querySelector(sel);
+const findElement = (selector) => document.querySelector(selector);
 
 /** `.events-layout[data-view]` per route view (CSS uses it for the mobile layout). */
 const LAYOUT_VIEW = Object.freeze({
@@ -55,20 +55,20 @@ function configOrReport(read) {
   } catch (error) {
     console.error(error);
     const problems = error.problems ?? [String(error.message ?? error)];
-    $("#list")?.replaceChildren(
-      h(
+    findElement("#list")?.replaceChildren(
+      createElementTree(
         "div",
         { class: "notice notice--error", role: "alert" },
-        h("p", null, "The app is not configured correctly:"),
-        h(
+        createElementTree("p", null, "The app is not configured correctly:"),
+        createElementTree(
           "ul",
           null,
-          problems.map((problem) => h("li", null, problem)),
+          problems.map((problem) => createElementTree("li", null, problem)),
         ),
-        h("p", null, "See frontend/.env.example."),
+        createElementTree("p", null, "See frontend/.env.example."),
       ),
     );
-    $("#list")?.setAttribute("aria-busy", "false");
+    findElement("#list")?.setAttribute("aria-busy", "false");
     return null;
   }
 }
@@ -83,16 +83,16 @@ function configOrReport(read) {
 export async function start({ config, mockConfig } = {}) {
   const appConfig = config ?? configOrReport(() => loadConfig(import.meta.env));
   if (!appConfig) return;
-  const mock = await mockOptions(
+  const mockSetup = await mockOptions(
     () => mockConfig ?? loadMockConfig(import.meta.env),
   );
-  if (!mock) return;
-  const api = createApi({ baseUrl: appConfig.apiBaseUrl, ...mock.api });
-  const toast = createToaster($("#toasts"));
+  if (!mockSetup) return;
+  const api = createApi({ baseUrl: appConfig.apiBaseUrl, ...mockSetup.api });
+  const toast = createToaster(findElement("#toasts"));
   const geo = createGeo();
   const atproto = createAtprotoWriter({
     ...appConfig.atproto,
-    ...mock.atproto,
+    ...mockSetup.atproto,
   });
   let devWriter = null;
   const store = createStore({
@@ -112,13 +112,15 @@ export async function start({ config, mockConfig } = {}) {
   });
 
   const writer = () => (atproto.loggedIn ? atproto : devWriter);
-  const canEdit = (ev) =>
-    Boolean(writer()) && ev.authorDid === writer().did && ev.source !== "ical";
+  const canEdit = (event) =>
+    Boolean(writer()) &&
+    event.authorDid === writer().did &&
+    event.source !== "ical";
 
   // --- data loading ---
-  let seq = 0;
+  let latestLoadSequence = 0;
   async function loadEvents({ append = false } = {}) {
-    const mine = ++seq;
+    const thisLoadSequence = ++latestLoadSequence;
     const { filters, cursor, events } = store.get();
     store.set({ loading: true, error: null });
     try {
@@ -131,7 +133,7 @@ export async function start({ config, mockConfig } = {}) {
         const response = await api.listEvents(
           buildEventQuery(filters, { cursor: nextCursor }),
         );
-        if (mine !== seq) return;
+        if (thisLoadSequence !== latestLoadSequence) return;
         merged = dedupe([...merged, ...response.data.events]);
         nextCursor = response.data.cursor ?? null;
         anyStale ||= response.stale;
@@ -148,11 +150,11 @@ export async function start({ config, mockConfig } = {}) {
         savedAt,
         loading: false,
       });
-    } catch (err) {
-      if (mine !== seq) return;
+    } catch (error) {
+      if (thisLoadSequence !== latestLoadSequence) return;
       store.set({
         loading: false,
-        error: err.offline
+        error: error.offline
           ? "You're offline and no saved events are available yet."
           : "Could not load events. Please try again.",
       });
@@ -174,15 +176,17 @@ export async function start({ config, mockConfig } = {}) {
       store.set({ locating: true });
       try {
         await geo.request();
-      } catch (err) {
-        toast(err.message, { kind: "error" });
+      } catch (error) {
+        toast(error.message, { kind: "error" });
         filters.nearMe = false;
       }
       store.set({ locating: false });
     }
     if (!filters.nearMe) geo.clear();
     store.set({ filters });
-    const refetch = ["tags", "group", "q"].some((k) => k in patch);
+    const refetch = ["tags", "group", "searchText"].some(
+      (filterKey) => filterKey in patch,
+    );
     if (refetch) loadEvents();
   }
 
@@ -196,11 +200,11 @@ export async function start({ config, mockConfig } = {}) {
 
   // --- views ---
   const findEvent = (uri) =>
-    store.get().events.find((e) => e.uri === uri) ?? null;
+    store.get().events.find((event) => event.uri === uri) ?? null;
   const notifications = createNotifications({
     api,
     toast,
-    onNotification: (n) => applyNotification(n),
+    onNotification: (notification) => applyNotification(notification),
   });
   // #19: subscriptions are records on the logged-in user's PDS (demo mode has no PDS).
   const subs = createSubscriptions({
@@ -218,15 +222,15 @@ export async function start({ config, mockConfig } = {}) {
     requestLogin: (request) => login.open(request),
     openEvent: (uri) => router.openEvent(uri),
   });
-  const detail = createDetailView($("#panel-detail"), {
+  const detail = createDetailView(findElement("#panel-detail"), {
     api,
     mapConfig: appConfig.map,
     findEvent,
     canEdit,
     isSubscribed: (uri) => store.get().subscribed.has(uri),
-    onToggleSubscribe: (ev) => subscribing.toggle(ev),
-    onEdit: (ev) => compose.open(ev),
-    onDelete: (ev) => compose.remove(ev),
+    onToggleSubscribe: (event) => subscribing.toggle(event),
+    onEdit: (event) => compose.open(event),
+    onDelete: (event) => compose.remove(event),
     onClose: () => router.home(),
     onCopyLink: (uri) => copyEventLink(uri),
   });
@@ -245,42 +249,47 @@ export async function start({ config, mockConfig } = {}) {
     },
     onDeleted: (uri) => {
       toast("Event deleted.");
-      store.set({ events: store.get().events.filter((e) => e.uri !== uri) });
+      store.set({
+        events: store.get().events.filter((event) => event.uri !== uri),
+      });
       if (detail.currentUri === uri) router.home();
     },
   });
-  const subscriptionsPage = createSubscriptionsView($("#panel-subscriptions"), {
-    api,
-    findEvent,
-    getSubscribed: () => store.get().subscribed,
-    isLoggedIn: () => atproto.loggedIn,
-    onLogin: () => login.open({ reason: LOGIN_FOR_SUBSCRIPTIONS_REASON }),
-    onClose: () => router.home(),
-    onOpen: (uri) => router.openEvent(uri),
-    onToggleSubscribe: (ev) => subscribing.toggle(ev),
-    onUnsubscribe: (uri) => subscribing.unsubscribe(uri),
-  });
+  const subscriptionsPage = createSubscriptionsView(
+    findElement("#panel-subscriptions"),
+    {
+      api,
+      findEvent,
+      getSubscribed: () => store.get().subscribed,
+      isLoggedIn: () => atproto.loggedIn,
+      onLogin: () => login.open({ reason: LOGIN_FOR_SUBSCRIPTIONS_REASON }),
+      onClose: () => router.home(),
+      onOpen: (uri) => router.openEvent(uri),
+      onToggleSubscribe: (event) => subscribing.toggle(event),
+      onUnsubscribe: (uri) => subscribing.unsubscribe(uri),
+    },
+  );
   const login = createLoginView({
-    login: (id, pw) => atproto.login(id, pw),
+    login: (id, password) => atproto.login(id, password),
     onLoggedIn: async () => {
       renderAccount();
       await subscribing.reload();
     },
   });
-  const filterBar = createFilterBar($("#filters"), {
+  const filterBar = createFilterBar(findElement("#filters"), {
     onChange: changeFilters,
     geoSupported: geo.supported,
   });
-  const datePicker = createDateFilter($("#event-date-filter"), {
+  const datePicker = createDateFilter(findElement("#event-date-filter"), {
     onChange: (dateFilter) => {
       store.set({ dateFilter });
       loadEvents();
     },
   });
-  const list = createListView($("#list"), {
+  const listView = createListView(findElement("#list"), {
     onLoadMore: () => loadEvents({ append: true }),
   });
-  const map = createMapView($("#map"), {
+  const map = createMapView(findElement("#map"), {
     config: appConfig.map,
     onOpen: (uri) => router.openEvent(uri),
   });
@@ -292,10 +301,10 @@ export async function start({ config, mockConfig } = {}) {
    */
   function applyRoute(route) {
     const view = LAYOUT_VIEW[route.view] ? route.view : "list";
-    $(".events-layout").dataset.view = LAYOUT_VIEW[view];
-    $("#panel-map").hidden = view !== "list";
-    $("#panel-detail").hidden = view !== "event";
-    $("#panel-subscriptions").hidden = view !== "subscriptions";
+    findElement(".events-layout").dataset.view = LAYOUT_VIEW[view];
+    findElement("#panel-map").hidden = view !== "list";
+    findElement("#panel-detail").hidden = view !== "event";
+    findElement("#panel-subscriptions").hidden = view !== "subscriptions";
     if (view === "event") detail.open(route.uri);
     else detail.close();
     if (view === "subscriptions") subscriptionsPage.open();
@@ -319,21 +328,28 @@ export async function start({ config, mockConfig } = {}) {
     }
   }
 
-  async function applyNotification(n) {
+  async function applyNotification(notification) {
     const { events } = store.get();
-    if (detail.currentUri === n.eventUri) detail.open(n.eventUri);
-    if (n.kind === "deleted" || n.kind === "expired") {
-      store.set({ events: events.filter((e) => e.uri !== n.eventUri) });
+    if (detail.currentUri === notification.eventUri)
+      detail.open(notification.eventUri);
+    if (notification.kind === "deleted" || notification.kind === "expired") {
+      store.set({
+        events: events.filter((event) => event.uri !== notification.eventUri),
+      });
     } else if (
-      n.kind === "updated" &&
-      events.some((e) => e.uri === n.eventUri)
+      notification.kind === "updated" &&
+      events.some((event) => event.uri === notification.eventUri)
     ) {
       try {
-        const { data } = await api.getEvent(n.eventUri);
+        const { data: updatedEvent } = await api.getEvent(
+          notification.eventUri,
+        );
         store.set({
           events: store
             .get()
-            .events.map((e) => (e.uri === data.uri ? data : e)),
+            .events.map((event) =>
+              event.uri === updatedEvent.uri ? updatedEvent : event,
+            ),
         });
       } catch {
         /* keep old copy */
@@ -342,27 +358,27 @@ export async function start({ config, mockConfig } = {}) {
   }
 
   function render() {
-    const s = store.get();
-    filterBar.render(s.filters, {
-      tags: s.tags,
-      groups: s.groups,
-      nearMeBusy: s.locating,
+    const state = store.get();
+    filterBar.render(state.filters, {
+      tags: state.tags,
+      groups: state.groups,
+      nearMeBusy: state.locating,
     });
-    datePicker.render(s.dateFilter);
+    datePicker.render(state.dateFilter);
     const shown = visibleEvents();
-    list.render({
+    listView.render({
       events: shown,
-      hasMore: Boolean(s.cursor),
-      loading: s.loading,
-      stale: s.stale,
-      savedAt: s.savedAt,
-      error: s.error,
-      activeTags: s.filters.tags,
-      subscribed: s.subscribed,
+      hasMore: Boolean(state.cursor),
+      loading: state.loading,
+      stale: state.stale,
+      savedAt: state.savedAt,
+      error: state.error,
+      activeTags: state.filters.tags,
+      subscribed: state.subscribed,
       onOpen: (uri) => router.openEvent(uri),
       onTagClick: (tag) =>
         changeFilters({ tags: toggleTag(store.get().filters.tags, tag) }),
-      onToggleSubscribe: (ev) => subscribing.toggle(ev),
+      onToggleSubscribe: (event) => subscribing.toggle(event),
     });
     map.show(shown);
     detail.refreshActions();
@@ -370,14 +386,14 @@ export async function start({ config, mockConfig } = {}) {
   }
 
   function renderAccount() {
-    const root = $("#account");
+    const root = findElement("#account");
     const canPost = Boolean(writer());
-    const items = [];
+    const accountItems = [];
     if (atproto.loggedIn) {
-      items.push(
-        h("span", { class: "muted" }, `@${atproto.handle}`),
+      accountItems.push(
+        createElementTree("span", { class: "muted" }, `@${atproto.handle}`),
         renderMySubscriptionsLink(),
-        h(
+        createElementTree(
           "button",
           {
             type: "button",
@@ -393,15 +409,15 @@ export async function start({ config, mockConfig } = {}) {
       );
     } else {
       if (devWriter)
-        items.push(
-          h(
+        accountItems.push(
+          createElementTree(
             "span",
             { class: "badge", title: "Posts go to the local dev index only" },
             "Demo mode",
           ),
         );
-      items.push(
-        h(
+      accountItems.push(
+        createElementTree(
           "button",
           {
             type: "button",
@@ -413,8 +429,8 @@ export async function start({ config, mockConfig } = {}) {
       );
     }
     if (canPost)
-      items.push(
-        h(
+      accountItems.push(
+        createElementTree(
           "button",
           {
             type: "button",
@@ -424,7 +440,7 @@ export async function start({ config, mockConfig } = {}) {
           "New event",
         ),
       );
-    root.replaceChildren(...items);
+    root.replaceChildren(...accountItems);
     render(); // edit rights may have changed
   }
 
@@ -435,9 +451,9 @@ export async function start({ config, mockConfig } = {}) {
   });
 
   try {
-    const { data } = await api.config();
-    store.set({ config: data });
-    if (data?.devMode) devWriter = createDevWriter({ api });
+    const { data: serverConfig } = await api.config();
+    store.set({ config: serverConfig });
+    if (serverConfig?.devMode) devWriter = createDevWriter({ api });
   } catch {
     /* offline with nothing cached: read-only */
   }
@@ -472,7 +488,9 @@ async function mockOptions(readMockConfig) {
   const noCache = { get: () => null, set: () => {} }; // never mix mock data into the real cache
   return {
     api: { fetchImpl: createMockFetch(), cache: noCache },
-    atproto: { fetchImpl: createMockPdsFetch({ tokens: mockConfig.pds }) },
+    atproto: {
+      fetchImpl: createMockPdsFetch({ tokens: mockConfig.tokenPrefixes }),
+    },
   };
 }
 
@@ -481,7 +499,7 @@ async function mockOptions(readMockConfig) {
  * @returns {HTMLElement}
  */
 const renderMySubscriptionsLink = () =>
-  h(
+  createElementTree(
     "a",
     {
       href: SUBSCRIPTIONS_ROUTE,
@@ -493,7 +511,7 @@ const renderMySubscriptionsLink = () =>
 
 function dedupe(events) {
   const seen = new Set();
-  return events.filter((e) => !seen.has(e.uri) && seen.add(e.uri));
+  return events.filter((event) => !seen.has(event.uri) && seen.add(event.uri));
 }
 
 function registerServiceWorker() {

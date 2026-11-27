@@ -17,8 +17,8 @@ const BROKEN_MOCK_URI_SUFFIX = "/mock-sunset";
  * @returns {Promise<{status: number, body: any}>}
  */
 async function getJson(mockFetch, url) {
-  const res = await mockFetch(url);
-  return { status: res.status, body: await res.json() };
+  const response = await mockFetch(url);
+  return { status: response.status, body: await response.json() };
 }
 
 describe("stubs/mockApi (the ?mock demo data, also usable by future e2e tests)", () => {
@@ -41,12 +41,12 @@ describe("stubs/mockApi (the ?mock demo data, also usable by future e2e tests)",
   it("returns one event by URI from /api/event, and 404 for unknown URIs", async () => {
     const mockFetch = createMockFetch();
     const { body } = await getJson(mockFetch, "/api/events");
-    const [first] = body.events;
+    const [firstEvent] = body.events;
     const found = await getJson(
       mockFetch,
-      `/api/event?uri=${encodeURIComponent(first.uri)}`,
+      `/api/event?uri=${encodeURIComponent(firstEvent.uri)}`,
     );
-    expect(found).toEqual({ status: 200, body: first });
+    expect(found).toEqual({ status: 200, body: firstEvent });
     const missing = await getJson(
       mockFetch,
       `/api/event?uri=${encodeURIComponent("at://did:plc:x/app.communitymap.event/nope")}`,

@@ -1,18 +1,26 @@
 import { describe, expect, it } from "vitest";
 import { blueskyProfileUrl, formatEventWhen } from "../src/format.js";
 
-const UTC = { locale: "en-US", timeZone: "UTC" };
+const UTC_OPTIONS = { locale: "en-US", timeZone: "UTC" };
 
 describe("format.formatEventWhen", () => {
   it("shows the date once for same-day events, with the time zone", () => {
     expect(
-      formatEventWhen("2026-11-11T19:00:00Z", "2026-11-11T21:00:00Z", UTC),
+      formatEventWhen(
+        "2026-11-11T19:00:00Z",
+        "2026-11-11T21:00:00Z",
+        UTC_OPTIONS,
+      ),
     ).toBe("Wednesday, November 11, 2026 · 7:00 PM – 9:00 PM UTC");
   });
 
   it("shows both dates for multi-day events", () => {
     expect(
-      formatEventWhen("2026-11-11T19:00:00Z", "2026-11-12T02:00:00Z", UTC),
+      formatEventWhen(
+        "2026-11-11T19:00:00Z",
+        "2026-11-12T02:00:00Z",
+        UTC_OPTIONS,
+      ),
     ).toBe(
       "Wednesday, November 11, 2026, 7:00 PM – Thursday, November 12, 2026, 2:00 AM UTC",
     );

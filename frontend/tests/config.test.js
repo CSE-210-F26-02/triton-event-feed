@@ -156,7 +156,7 @@ describe("loadConfig", () => {
 describe("loadMockConfig (?mock demo mode only)", () => {
   it("reads the mock PDS token prefixes", () => {
     expect(loadMockConfig(TEST_ENV)).toEqual({
-      pds: {
+      tokenPrefixes: {
         accessTokenPrefix: "test-access-",
         refreshTokenPrefix: "test-refresh-",
       },
@@ -165,8 +165,8 @@ describe("loadMockConfig (?mock demo mode only)", () => {
 
   it("is not needed by the main config (production never sets it)", () => {
     const {
-      VITE_MOCK_PDS_ACCESS_TOKEN_PREFIX: _a,
-      VITE_MOCK_PDS_REFRESH_TOKEN_PREFIX: _r,
+      VITE_MOCK_PDS_ACCESS_TOKEN_PREFIX: _accessPrefix,
+      VITE_MOCK_PDS_REFRESH_TOKEN_PREFIX: _refreshPrefix,
       ...productionEnv
     } = TEST_ENV;
     expect(() => loadConfig(productionEnv)).not.toThrow();

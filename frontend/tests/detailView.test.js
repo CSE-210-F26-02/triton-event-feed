@@ -20,14 +20,14 @@ import { lexiconEventView, sampleEvent } from "./helpers.js";
 
 const BEFORE_EVENT = new Date("2026-11-11T12:00:00Z");
 const AFTER_EVENT = new Date("2026-11-12T00:00:00Z");
-const UTC = { locale: "en-US", timeZone: "UTC", now: BEFORE_EVENT };
+const UTC_OPTIONS = { locale: "en-US", timeZone: "UTC", now: BEFORE_EVENT };
 
 /** Pin map stand-in so tests never load Leaflet. */
 const fakePinMap = () => ({ show: vi.fn(async () => {}), destroy: vi.fn() });
 
 describe("detailView.renderDetail", () => {
   it("shows title, local time, location, tags, group and linked host", () => {
-    const article = renderDetail(sampleEvent(), UTC);
+    const article = renderDetail(sampleEvent(), UTC_OPTIONS);
     expect(article.querySelector("#detail-title").textContent).toBe(
       "Taco Tuesday",
     );
@@ -40,7 +40,7 @@ describe("detailView.renderDetail", () => {
     );
     expect(
       [...article.querySelectorAll(".detail__tags li")].map(
-        (li) => li.textContent,
+        (listItem) => listItem.textContent,
       ),
     ).toEqual(["#food", "#free"]);
     expect(article.querySelector(".detail__group").textContent).toBe(
@@ -63,24 +63,28 @@ describe("detailView.renderDetail", () => {
           { text: "Starting soon!", createdAt: "2026-11-11T18:30:00Z" },
         ],
       }),
-      UTC,
+      UTC_OPTIONS,
     );
     expect(article.querySelector(".detail__desc").textContent).toBe(
       "<b>Bring</b> a plate",
     );
     expect(article.querySelector("b")).toBeNull();
     expect(
-      [...article.querySelectorAll(".updates p")].map((p) => p.textContent),
+      [...article.querySelectorAll(".updates p")].map(
+        (paragraph) => paragraph.textContent,
+      ),
     ).toEqual(["Starting soon!", "Moved inside"]);
   });
 
   it('shows "Updated <time>" only when the event was edited', () => {
     expect(
-      renderDetail(sampleEvent(), UTC).querySelector(".detail__updated"),
+      renderDetail(sampleEvent(), UTC_OPTIONS).querySelector(
+        ".detail__updated",
+      ),
     ).toBeNull();
     const edited = renderDetail(
       sampleEvent({ updatedAt: "2026-11-10T15:30:00Z" }),
-      UTC,
+      UTC_OPTIONS,
     );
     expect(edited.querySelector(".detail__updated").textContent).toBe(
       "Updated Nov 10, 3:30 PM",
@@ -89,14 +93,14 @@ describe("detailView.renderDetail", () => {
 
   it('shows "This event has ended" for past events and hides Subscribe', () => {
     const upcoming = renderDetail(sampleEvent(), {
-      ...UTC,
+      ...UTC_OPTIONS,
       onToggleSubscribe: () => {},
     });
     expect(upcoming.textContent).not.toContain("This event has ended");
     expect(upcoming.querySelector("[data-action=subscribe]")).not.toBeNull();
 
     const ended = renderDetail(sampleEvent({ status: "live" }), {
-      ...UTC,
+      ...UTC_OPTIONS,
       now: AFTER_EVENT,
       onToggleSubscribe: () => {},
     });
@@ -110,7 +114,7 @@ describe("detailView.renderDetail", () => {
   it("only links http(s) source URLs", () => {
     const article = renderDetail(
       sampleEvent({ sourceUrl: "javascript:alert(1)" }),
-      UTC,
+      UTC_OPTIONS,
     );
     expect(article.querySelector('a[href^="javascript"]')).toBeNull();
   });
@@ -119,25 +123,29 @@ describe("detailView.renderDetail", () => {
     const onClose = vi.fn();
     const onCopyLink = vi.fn();
     const article = renderDetail(sampleEvent(), {
-      ...UTC,
+      ...UTC_OPTIONS,
       onClose,
       onCopyLink,
     });
     const buttons = [...article.querySelectorAll(".detail__toolbar button")];
-    buttons.find((b) => b.textContent.includes("Back")).click();
-    buttons.find((b) => b.textContent === "Copy link").click();
+    buttons.find((button) => button.textContent.includes("Back")).click();
+    buttons.find((button) => button.textContent === "Copy link").click();
     expect(onClose).toHaveBeenCalled();
     expect(onCopyLink).toHaveBeenCalledWith(sampleEvent().uri);
   });
 });
 
 describe("detailView.renderActions", () => {
-  const labels = (buttons) => buttons.map((b) => b.textContent);
+  const labels = (buttons) => buttons.map((button) => button.textContent);
 
   it("reserves disabled slots for directions (#22) and calendar (#23)", () => {
     const buttons = renderActions(sampleEvent());
-    const directions = buttons.find((b) => b.dataset.slot === "directions");
-    const calendar = buttons.find((b) => b.dataset.slot === "calendar");
+    const directions = buttons.find(
+      (button) => button.dataset.slot === "directions",
+    );
+    const calendar = buttons.find(
+      (button) => button.dataset.slot === "calendar",
+    );
     expect(directions.disabled).toBe(true);
     expect(calendar.disabled).toBe(true);
   });
@@ -170,8 +178,8 @@ describe("detailView.renderActions", () => {
       onEdit,
       onDelete,
     });
-    buttons.find((b) => b.dataset.action === "edit").click();
-    buttons.find((b) => b.dataset.action === "delete").click();
+    buttons.find((button) => button.dataset.action === "edit").click();
+    buttons.find((button) => button.dataset.action === "delete").click();
     expect(onEdit).toHaveBeenCalledWith(sampleEvent());
     expect(onDelete).toHaveBeenCalledWith(sampleEvent());
   });
@@ -180,7 +188,7 @@ describe("detailView.renderActions", () => {
 describe("detailView subscribe slot (#19)", () => {
   it("links the Subscribe button to visible privacy help text", () => {
     const article = renderDetail(sampleEvent(), {
-      ...UTC,
+      ...UTC_OPTIONS,
       onToggleSubscribe: () => {},
     });
     const button = article.querySelector("[data-action=subscribe]");
@@ -192,7 +200,7 @@ describe("detailView subscribe slot (#19)", () => {
 
   it("shows no Subscribe button and no privacy note on an ended event", () => {
     const article = renderDetail(sampleEvent(), {
-      ...UTC,
+      ...UTC_OPTIONS,
       now: AFTER_EVENT,
       onToggleSubscribe: () => {},
     });
@@ -213,7 +221,7 @@ describe("detailView subscribe slot (#19)", () => {
   });
 
   it("shows no privacy note when subscriptions are unavailable", () => {
-    const article = renderDetail(sampleEvent(), UTC);
+    const article = renderDetail(sampleEvent(), UTC_OPTIONS);
     expect(article.querySelector(`#${PRIVACY_NOTE_ID}`)).toBeNull();
   });
 });
@@ -232,7 +240,7 @@ describe("detailView.renderNotFound", () => {
 
 describe("detailView.createDetailView", () => {
   /** Build a controller with a fake pin map and the given api/deps. */
-  function setup(deps) {
+  function setup(dependencies) {
     const root = document.createElement("div");
     document.body.replaceChildren(root);
     const pinMaps = [];
@@ -243,7 +251,7 @@ describe("detailView.createDetailView", () => {
         pinMaps.push(pinMap);
         return pinMap;
       },
-      ...deps,
+      ...dependencies,
     });
     return { root, view, pinMaps };
   }
@@ -315,7 +323,7 @@ describe("detailView.createDetailView", () => {
     await view.open(sampleEvent().uri);
     expect(root.textContent).toContain("Could not load this event");
     [...root.querySelectorAll("button")]
-      .find((b) => b.textContent === "Try again")
+      .find((button) => button.textContent === "Try again")
       .click();
     await vi.waitFor(() =>
       expect(root.querySelector("#detail-title").textContent).toBe(
@@ -333,18 +341,18 @@ describe("detailView.createDetailView", () => {
         }),
     };
     const { root, view } = setup({ api });
-    const first = view.open("at://did:plc:a/app.communitymap.event/1");
-    const second = view.open("at://did:plc:a/app.communitymap.event/2");
+    const firstOpen = view.open("at://did:plc:a/app.communitymap.event/1");
+    const secondOpen = view.open("at://did:plc:a/app.communitymap.event/2");
     resolvers["at://did:plc:a/app.communitymap.event/2"]({
       data: sampleEvent({ name: "Second" }),
       stale: false,
     });
-    await second;
+    await secondOpen;
     resolvers["at://did:plc:a/app.communitymap.event/1"]({
       data: sampleEvent({ name: "First" }),
       stale: false,
     });
-    await first;
+    await firstOpen;
     expect(root.querySelector("#detail-title").textContent).toBe("Second");
   });
 
@@ -387,14 +395,14 @@ describe("detailView.renderDetail with lexicon records", () => {
   /** A valid event built from the shared full fixture (fixtures/event/valid/full.json). */
   const lexiconEvent = (over) => lexiconEventView(fullFixture.record, over);
   const BEFORE_HACKATHON = new Date("2026-12-01T00:00:00Z");
-  const LA = {
+  const LOS_ANGELES_TIME = {
     locale: "en-US",
     timeZone: "America/Los_Angeles",
     now: BEFORE_HACKATHON,
   };
 
   it("renders every lexicon field in local time with no warning", () => {
-    const article = renderDetail(lexiconEvent(), LA);
+    const article = renderDetail(lexiconEvent(), LOS_ANGELES_TIME);
     expect(article.querySelector("#detail-title").textContent).toBe(
       "Triton Hackathon Kickoff",
     );
@@ -410,7 +418,7 @@ describe("detailView.renderDetail with lexicon records", () => {
     );
     expect(
       [...article.querySelectorAll(".detail__tags li")].map(
-        (li) => li.textContent,
+        (listItem) => listItem.textContent,
       ),
     ).toEqual(["#hackathon", "#cse", "#free-food"]);
     expect(article.querySelector(".detail__desc").textContent).toBe(
@@ -424,7 +432,7 @@ describe("detailView.renderDetail with lexicon records", () => {
   });
 
   it("labels a strongRef group with its record key and keeps its URI (STUB #17)", () => {
-    const group = renderDetail(lexiconEvent(), LA).querySelector(
+    const group = renderDetail(lexiconEvent(), LOS_ANGELES_TIME).querySelector(
       ".detail__group",
     );
     expect(group.textContent).toBe("3lbxq7k2mzs2a");
@@ -432,7 +440,7 @@ describe("detailView.renderDetail with lexicon records", () => {
   });
 
   it("keeps legacy string groups readable, without a group URI", () => {
-    const group = renderDetail(sampleEvent(), UTC).querySelector(
+    const group = renderDetail(sampleEvent(), UTC_OPTIONS).querySelector(
       ".detail__group",
     );
     expect(group.textContent).toBe("Triton Eats");
@@ -441,7 +449,7 @@ describe("detailView.renderDetail with lexicon records", () => {
 
   it("renders the minimal fixture: no group, tags, description or address", () => {
     const article = renderDetail(lexiconEventView(minimalFixture.record), {
-      ...UTC,
+      ...UTC_OPTIONS,
       now: new Date("2026-11-30T00:00:00Z"),
     });
     expect(article.querySelector(".detail__group")).toBeNull();
@@ -454,7 +462,7 @@ describe("detailView.renderDetail with lexicon records", () => {
 
   it("shows the ended notice for a lexicon event whose endsAt has passed", () => {
     const article = renderDetail(lexiconEvent(), {
-      ...LA,
+      ...LOS_ANGELES_TIME,
       now: new Date("2026-12-05T12:00:00Z"),
     });
     expect(article.querySelector(".detail__ended").textContent).toBe(
@@ -464,11 +472,11 @@ describe("detailView.renderDetail with lexicon records", () => {
 
   it("hands the original EventView (not the display copy) to Edit", () => {
     const onEdit = vi.fn();
-    const ev = lexiconEvent();
-    renderDetail(ev, { ...LA, canEdit: true, onEdit })
+    const event = lexiconEvent();
+    renderDetail(event, { ...LOS_ANGELES_TIME, canEdit: true, onEdit })
       .querySelector("[data-action=edit]")
       .click();
-    expect(onEdit).toHaveBeenCalledWith(ev);
+    expect(onEdit).toHaveBeenCalledWith(event);
   });
 });
 
@@ -476,7 +484,7 @@ describe("detailView.renderDetail best-effort for records that break the lexicon
   it("renders the record with a warning when it fails validation", () => {
     const article = renderDetail(
       lexiconEventView(missingLatFixture.record),
-      UTC,
+      UTC_OPTIONS,
     );
     expect(article.querySelector(".detail__invalid").textContent).toBe(
       INVALID_RECORD_NOTICE,
@@ -498,7 +506,7 @@ describe("detailView.renderDetail best-effort for records that break the lexicon
         group: { uri: "nope" },
         updates: [{ text: "ok", createdAt: "bad" }],
       },
-      UTC,
+      UTC_OPTIONS,
     );
     expect(article.querySelector("#detail-title").textContent).toBe(
       UNTITLED_EVENT_NAME,
@@ -514,7 +522,7 @@ describe("detailView.renderDetail best-effort for records that break the lexicon
   });
 
   it('leaves data-uri off (instead of writing "null") when the record has no URI', () => {
-    const article = renderDetail({ name: "No URI" }, UTC);
+    const article = renderDetail({ name: "No URI" }, UTC_OPTIONS);
     expect(article.hasAttribute("data-uri")).toBe(false);
     expect(article.querySelector(".detail__toolbar").textContent).not.toContain(
       "Copy link",
@@ -522,7 +530,10 @@ describe("detailView.renderDetail best-effort for records that break the lexicon
   });
 
   it("shows just the start time when the end time is unusable", () => {
-    const article = renderDetail(sampleEvent({ endsAt: "whenever" }), UTC);
+    const article = renderDetail(
+      sampleEvent({ endsAt: "whenever" }),
+      UTC_OPTIONS,
+    );
     expect(article.querySelector(".detail__when").textContent).toBe(
       "Nov 11, 7:00 PM",
     );
@@ -535,7 +546,7 @@ describe("detailView.renderDetail best-effort for records that break the lexicon
         location: { name: "<script>x()</script>", lat: "1", lng: "1" },
         tags: ["<b>tag</b>"],
       }),
-      UTC,
+      UTC_OPTIONS,
     );
     expect(article.querySelector("img, script, b")).toBeNull();
     expect(article.querySelector("#detail-title").textContent).toBe(
@@ -546,14 +557,14 @@ describe("detailView.renderDetail best-effort for records that break the lexicon
 
 describe("detailView.createDetailView with lexicon records", () => {
   /** Build a controller with a fake pin map and the given deps. */
-  function setup(deps) {
+  function setup(dependencies) {
     const root = document.createElement("div");
     document.body.replaceChildren(root);
     const view = createDetailView(root, {
       now: () => BEFORE_EVENT,
       pinMapFactory: fakePinMap,
       onInvalidRecord: vi.fn(),
-      ...deps,
+      ...dependencies,
     });
     return { root, view };
   }
@@ -604,14 +615,19 @@ describe("detailView.createDetailView with lexicon records", () => {
     ["null", null],
     ["a string", "Taco Tuesday"],
     ["an array", [sampleEvent()]],
-  ])("shows Event not found when the API returns %s", async (_label, data) => {
-    const api = { getEvent: vi.fn(async () => ({ data, stale: false })) };
-    const { root, view } = setup({ api });
-    await view.open(sampleEvent().uri);
-    expect(root.querySelector("#detail-title").textContent).toBe(
-      "Event not found",
-    );
-  });
+  ])(
+    "shows Event not found when the API returns %s",
+    async (_label, responseData) => {
+      const api = {
+        getEvent: vi.fn(async () => ({ data: responseData, stale: false })),
+      };
+      const { root, view } = setup({ api });
+      await view.open(sampleEvent().uri);
+      expect(root.querySelector("#detail-title").textContent).toBe(
+        "Event not found",
+      );
+    },
+  );
 
   it("shows Event not found when the API resolves with nothing", async () => {
     const api = { getEvent: vi.fn(async () => undefined) };
@@ -631,7 +647,7 @@ describe("detailView.createDetailView with lexicon records", () => {
     await view.open(requested);
     expect(view.currentUri).toBe(requested);
     [...root.querySelectorAll("button")]
-      .find((b) => b.textContent === "Copy link")
+      .find((button) => button.textContent === "Copy link")
       .click();
     expect(onCopyLink).toHaveBeenCalledWith(requested);
   });

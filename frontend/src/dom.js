@@ -3,7 +3,7 @@
  * @module dom
  */
 
-const PROPS = new Set([
+const DOM_PROPERTY_NAMES = new Set([
   "value",
   "checked",
   "selected",
@@ -19,32 +19,35 @@ const PROPS = new Set([
  * @param {...any} children nodes, strings, arrays, or null/false (skipped)
  * @returns {HTMLElement}
  */
-export function h(tag, props, ...children) {
-  const el = document.createElement(tag);
-  for (const [key, val] of Object.entries(props || {})) setProp(el, key, val);
-  append(el, children);
-  return el;
+export function createElementTree(tag, props, ...children) {
+  const element = document.createElement(tag);
+  for (const [key, value] of Object.entries(props || {}))
+    setProp(element, key, value);
+  append(element, children);
+  return element;
 }
 
-function setProp(el, key, val) {
-  if (val == null || val === false) return;
-  if (key === "class") el.className = val;
-  else if (key === "dataset") Object.assign(el.dataset, val);
-  else if (key.startsWith("on") && typeof val === "function") {
-    el.addEventListener(key.slice(2).toLowerCase(), val);
-  } else if (PROPS.has(key)) el[key] = val;
-  else el.setAttribute(key, val === true ? "" : String(val));
+function setProp(element, key, value) {
+  if (value == null || value === false) return;
+  if (key === "class") element.className = value;
+  else if (key === "dataset") Object.assign(element.dataset, value);
+  else if (key.startsWith("on") && typeof value === "function") {
+    element.addEventListener(key.slice(2).toLowerCase(), value);
+  } else if (DOM_PROPERTY_NAMES.has(key)) element[key] = value;
+  else element.setAttribute(key, value === true ? "" : String(value));
 }
 
 /**
  * Append children (flattening arrays, skipping null/false).
- * @param {Node} el
+ * @param {Node} parent
  * @param {any[]} children
  */
-export function append(el, children) {
-  for (const c of children.flat(Infinity)) {
-    if (c == null || c === false) continue;
-    el.append(c instanceof Node ? c : document.createTextNode(String(c)));
+export function append(parent, children) {
+  for (const child of children.flat(Infinity)) {
+    if (child == null || child === false) continue;
+    parent.append(
+      child instanceof Node ? child : document.createTextNode(String(child)),
+    );
   }
 }
 
@@ -55,8 +58,10 @@ export function append(el, children) {
  */
 export function safeHttpUrl(url) {
   try {
-    const u = new URL(url);
-    return u.protocol === "http:" || u.protocol === "https:" ? u.href : null;
+    const parsedUrl = new URL(url);
+    return parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:"
+      ? parsedUrl.href
+      : null;
   } catch {
     return null;
   }

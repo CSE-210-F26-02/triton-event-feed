@@ -1,22 +1,27 @@
 import { describe, expect, it, vi } from "vitest";
-import { h, safeHttpUrl } from "../src/dom.js";
+import { createElementTree, safeHttpUrl } from "../src/dom.js";
 
-describe("h()", () => {
+describe("createElementTree()", () => {
   it("escapes text children and sets attributes/handlers", () => {
-    const fn = vi.fn();
-    const el = h(
+    const clickHandler = vi.fn();
+    const button = createElementTree(
       "button",
-      { class: "b", "aria-pressed": "true", onclick: fn, dataset: { k: "v" } },
+      {
+        class: "b",
+        "aria-pressed": "true",
+        onclick: clickHandler,
+        dataset: { testKey: "testValue" },
+      },
       "<img src=x onerror=alert(1)>",
       null,
       ["a", 1],
     );
-    expect(el.querySelector("img")).toBeNull();
-    expect(el.textContent).toBe("<img src=x onerror=alert(1)>a1");
-    expect(el.className).toBe("b");
-    expect(el.dataset.k).toBe("v");
-    el.click();
-    expect(fn).toHaveBeenCalled();
+    expect(button.querySelector("img")).toBeNull();
+    expect(button.textContent).toBe("<img src=x onerror=alert(1)>a1");
+    expect(button.className).toBe("b");
+    expect(button.dataset.testKey).toBe("testValue");
+    button.click();
+    expect(clickHandler).toHaveBeenCalled();
   });
 
   it("safeHttpUrl allows only http(s)", () => {

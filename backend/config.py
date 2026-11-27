@@ -134,13 +134,17 @@ def _parse_origins(environ, name, problems) -> list[str] | None:
     value = _require(environ, name, problems)
     if value is None:
         return None
-    origins = [item.strip() for item in value.split(",") if item.strip()]
+    origins = [part.strip() for part in value.split(",") if part.strip()]
     if origins == [ANY_ORIGIN]:
         return origins
-    bad = [item for item in origins if not _is_http_origin(item)]
-    if bad or not origins:
-        expected = '"*" or comma-separated http(s) origins'
-        problems.append(f"{name} must be {expected}, got {value!r}")
+    invalid_origins = [
+        origin for origin in origins if not _is_http_origin(origin)
+    ]
+    if invalid_origins or not origins:
+        problems.append(
+            f'{name} must be "*" or comma-separated http(s) origins, '
+            f"got {value!r}"
+        )
         return None
     return origins
 

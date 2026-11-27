@@ -28,14 +28,17 @@ export class ApiError extends Error {
  * @returns {string} query string including leading "?" (or "")
  */
 export function toQueryString(params = {}) {
-  const sp = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) {
-    for (const item of Array.isArray(v) ? v : [v]) {
-      if (item != null && item !== "") sp.append(k, String(item));
+  const searchParams = new URLSearchParams();
+  for (const [paramName, paramValue] of Object.entries(params)) {
+    for (const singleValue of Array.isArray(paramValue)
+      ? paramValue
+      : [paramValue]) {
+      if (singleValue != null && singleValue !== "")
+        searchParams.append(paramName, String(singleValue));
     }
   }
-  const s = sp.toString();
-  return s ? `?${s}` : "";
+  const queryString = searchParams.toString();
+  return queryString ? `?${queryString}` : "";
 }
 
 /**
@@ -49,83 +52,93 @@ export function toQueryString(params = {}) {
  */
 export function createApi({
   baseUrl = "",
-  fetchImpl = (...a) => fetch(...a),
+  fetchImpl = (...fetchArguments) => fetch(...fetchArguments),
   cache = createCache(),
   timeoutMs = 8000,
 } = {}) {
   const root = baseUrl.replace(/\/$/, "");
   const url = (path, params) => `${root}${path}${toQueryString(params)}`;
 
-  async function request(method, target, body) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  async function request(method, requestUrl, body) {
+    const abortController = new AbortController();
+    const timer = setTimeout(() => abortController.abort(), timeoutMs);
     try {
-      const init = {
+      const requestInit = {
         method,
-        signal: ctrl.signal,
+        signal: abortController.signal,
         headers: { Accept: "application/json" },
       };
       if (body !== undefined) {
-        init.headers["Content-Type"] = "application/json";
-        init.body = JSON.stringify(body);
+        requestInit.headers["Content-Type"] = "application/json";
+        requestInit.body = JSON.stringify(body);
       }
-      return await fetchImpl(target, init);
+      return await fetchImpl(requestUrl, requestInit);
     } finally {
       clearTimeout(timer);
     }
   }
 
-  async function parse(res) {
-    if (res.status === 204) return null;
-    const text = await res.text();
+  async function parse(response) {
+    if (response.status === 204) return null;
+    const text = await response.text();
     return text ? JSON.parse(text) : null;
   }
 
-  async function errorFrom(res) {
+  async function errorFrom(response) {
     let body = null;
     try {
-      body = await parse(res);
+      body = await parse(response);
     } catch {
       /* non-JSON error body */
     }
-    return new ApiError(`HTTP ${res.status}`, { status: res.status, body });
+    return new ApiError(`HTTP ${response.status}`, {
+      status: response.status,
+      body,
+    });
   }
 
   /** GET with cache write-through and stale fallback. */
   async function get(path, params, { useCache = true } = {}) {
-    const target = url(path, params);
-    let res;
+    const requestUrl = url(path, params);
+    let response;
     try {
-      res = await request("GET", target);
-    } catch (err) {
-      return fallback(target, useCache, err);
+      response = await request("GET", requestUrl);
+    } catch (error) {
+      return fallback(requestUrl, useCache, error);
     }
-    if (res.status >= 500)
-      return fallback(target, useCache, await errorFrom(res));
-    if (!res.ok) throw await errorFrom(res);
-    const data = await parse(res);
+    if (response.status >= 500)
+      return fallback(requestUrl, useCache, await errorFrom(response));
+    if (!response.ok) throw await errorFrom(response);
+    const responseBody = await parse(response);
     // The service worker marks responses it served from its own cache.
-    const swStale = res.headers?.get?.("x-cm-stale") === "1";
-    if (useCache && !swStale) cache.set(target, data);
-    return swStale ? { data, stale: true } : { data, stale: false };
+    const swStale = response.headers?.get?.("x-cm-stale") === "1";
+    if (useCache && !swStale) cache.set(requestUrl, responseBody);
+    return swStale
+      ? { data: responseBody, stale: true }
+      : { data: responseBody, stale: false };
   }
 
-  function fallback(target, useCache, err) {
-    const hit = useCache ? cache.get(target) : null;
-    if (hit) return { data: hit.value, stale: true, savedAt: hit.savedAt };
-    if (err instanceof ApiError) throw err;
+  function fallback(requestUrl, useCache, error) {
+    const cachedEntry = useCache ? cache.get(requestUrl) : null;
+    if (cachedEntry)
+      return {
+        data: cachedEntry.value,
+        stale: true,
+        savedAt: cachedEntry.savedAt,
+      };
+    if (error instanceof ApiError) throw error;
     throw new ApiError("Network unavailable", { offline: true });
   }
 
   async function send(method, path, body) {
-    let res;
+    let response;
     try {
-      res = await request(method, url(path), body);
+      response = await request(method, url(path), body);
     } catch {
       throw new ApiError("Network unavailable", { offline: true });
     }
-    if (!res.ok) throw await errorFrom(res);
-    return parse(res);
+    if (!response.ok) throw await errorFrom(response);
+    return parse(response);
   }
 
   return {

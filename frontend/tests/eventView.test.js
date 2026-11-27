@@ -23,7 +23,7 @@ const GROUP_URI =
 describe("eventView.isPlainObject", () => {
   it.each([
     [{}, true],
-    [{ a: 1 }, true],
+    [{ field: 1 }, true],
     [null, false],
     [undefined, false],
     [[], false],

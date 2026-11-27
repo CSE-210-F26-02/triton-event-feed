@@ -1,4 +1,4 @@
-import { append, h } from "../dom.js";
+import { append, createElementTree } from "../dom.js";
 import { dayKey } from "../filters.js";
 
 const emptySelection = () => ({
@@ -20,7 +20,7 @@ export function createDateFilter(root, { onChange, now = new Date() }) {
   let draft = emptySelection();
   let applied = null;
   let isOpen = false;
-  const trigger = h(
+  const triggerButton = createElementTree(
     "button",
     {
       type: "button",
@@ -31,9 +31,12 @@ export function createDateFilter(root, { onChange, now = new Date() }) {
       "aria-controls": "event-date-picker",
       onclick: () => (isOpen ? close() : open()),
     },
-    h("span", { class: "calendar-icon", "aria-hidden": "true" }),
+    createElementTree("span", {
+      class: "calendar-icon",
+      "aria-hidden": "true",
+    }),
   );
-  const picker = h("div", {
+  const picker = createElementTree("div", {
     id: "event-date-picker",
     class: "date-picker",
     popover: "auto",
@@ -45,58 +48,59 @@ export function createDateFilter(root, { onChange, now = new Date() }) {
       if (event.key === "Escape") {
         event.preventDefault();
         close();
-        trigger.focus();
+        triggerButton.focus();
       }
     },
     ontoggle: (event) => {
       if (event.newState === "closed") {
         isOpen = false;
-        trigger.setAttribute("aria-expanded", "false");
+        triggerButton.setAttribute("aria-expanded", "false");
       }
     },
   });
-  root.replaceChildren(trigger, picker);
+  root.replaceChildren(triggerButton, picker);
 
   function close() {
     if (typeof picker.hidePopover === "function") picker.hidePopover();
     picker.hidden = true;
     isOpen = false;
-    trigger.setAttribute("aria-expanded", "false");
+    triggerButton.setAttribute("aria-expanded", "false");
   }
 
   function open() {
     draft = applied
       ? { ...applied, dates: [...(applied.dates || [])] }
       : emptySelection();
-    const first = draft.mode === "range" ? draft.start : draft.dates[0];
-    if (first) {
-      const day = new Date(`${first}T12:00:00`);
+    const firstSelectedDay =
+      draft.mode === "range" ? draft.start : draft.dates[0];
+    if (firstSelectedDay) {
+      const day = new Date(`${firstSelectedDay}T12:00:00`);
       month = new Date(day.getFullYear(), day.getMonth(), 1);
     }
-    draw();
+    renderCalendarMonth();
     picker.hidden = false;
-    const bounds = trigger.getBoundingClientRect();
-    const width = Math.min(352, window.innerWidth - 32);
-    picker.style.left = `${Math.max(16, Math.min(bounds.right - width, window.innerWidth - width - 16))}px`;
-    const top = Math.max(
+    const bounds = triggerButton.getBoundingClientRect();
+    const popoverWidth = Math.min(352, window.innerWidth - 32);
+    picker.style.left = `${Math.max(16, Math.min(bounds.right - popoverWidth, window.innerWidth - popoverWidth - 16))}px`;
+    const popoverTop = Math.max(
       16,
       Math.min(
         bounds.bottom + 8,
         window.innerHeight - Math.min(520, window.innerHeight - 32) - 16,
       ),
     );
-    picker.style.top = `${top}px`;
-    picker.style.maxHeight = `${window.innerHeight - top - 16}px`;
+    picker.style.top = `${popoverTop}px`;
+    picker.style.maxHeight = `${window.innerHeight - popoverTop - 16}px`;
     if (typeof picker.showPopover === "function") picker.showPopover();
     isOpen = true;
-    trigger.setAttribute("aria-expanded", "true");
+    triggerButton.setAttribute("aria-expanded", "true");
     picker.querySelector('[aria-pressed="true"]')?.focus();
   }
 
   function selectDay(key) {
     if (draft.mode === "multiple") {
       draft.dates = draft.dates.includes(key)
-        ? draft.dates.filter((d) => d !== key)
+        ? draft.dates.filter((selectedDay) => selectedDay !== key)
         : [...draft.dates, key].sort();
     } else if (!draft.start || draft.end) {
       draft.start = key;
@@ -104,11 +108,11 @@ export function createDateFilter(root, { onChange, now = new Date() }) {
     } else {
       [draft.start, draft.end] = [draft.start, key].sort();
     }
-    draw();
+    renderCalendarMonth();
     picker.querySelector(`[data-date="${key}"]`)?.focus();
   }
 
-  function draw() {
+  function renderCalendarMonth() {
     const selected = (key) =>
       draft.mode === "multiple"
         ? draft.dates.includes(key)
@@ -117,19 +121,19 @@ export function createDateFilter(root, { onChange, now = new Date() }) {
             key >= draft.start &&
             key <= (draft.end || draft.start),
           );
-    const days = new Date(
+    const daysInMonth = new Date(
       month.getFullYear(),
       month.getMonth() + 1,
       0,
     ).getDate();
-    const cells = Array.from({ length: month.getDay() }, () =>
-      h("span", { "aria-hidden": "true" }),
+    const calendarCells = Array.from({ length: month.getDay() }, () =>
+      createElementTree("span", { "aria-hidden": "true" }),
     );
-    for (let day = 1; day <= days; day++) {
-      const date = new Date(month.getFullYear(), month.getMonth(), day);
+    for (let dayOfMonth = 1; dayOfMonth <= daysInMonth; dayOfMonth++) {
+      const date = new Date(month.getFullYear(), month.getMonth(), dayOfMonth);
       const key = dayKey(date);
-      cells.push(
-        h(
+      calendarCells.push(
+        createElementTree(
           "button",
           {
             type: "button",
@@ -140,19 +144,19 @@ export function createDateFilter(root, { onChange, now = new Date() }) {
             dataset: { date: key },
             onclick: () => selectDay(key),
           },
-          String(day),
+          String(dayOfMonth),
         ),
       );
     }
     const modeButton = (mode, label) =>
-      h(
+      createElementTree(
         "button",
         {
           type: "button",
           "aria-pressed": String(draft.mode === mode),
           onclick: () => {
             draft = { ...emptySelection(), mode };
-            draw();
+            renderCalendarMonth();
             picker.querySelector(`[data-mode="${mode}"]`)?.focus();
           },
           dataset: { mode },
@@ -161,7 +165,7 @@ export function createDateFilter(root, { onChange, now = new Date() }) {
       );
     const moveMonth = (offset) => {
       month = new Date(month.getFullYear(), month.getMonth() + offset, 1);
-      draw();
+      renderCalendarMonth();
       picker
         .querySelector(
           offset < 0
@@ -174,7 +178,7 @@ export function createDateFilter(root, { onChange, now = new Date() }) {
       draft.mode === "multiple"
         ? draft.dates.length > 0
         : Boolean(draft.start && draft.end && draft.start <= draft.end);
-    const summary =
+    const selectionSummary =
       draft.mode === "multiple"
         ? `${draft.dates.length} date${draft.dates.length === 1 ? "" : "s"} selected`
         : !draft.start
@@ -186,11 +190,11 @@ export function createDateFilter(root, { onChange, now = new Date() }) {
               : `${formatDay(draft.start)} – ${formatDay(draft.end)}`;
     picker.replaceChildren();
     append(picker, [
-      h(
+      createElementTree(
         "div",
         { class: "date-picker__heading" },
-        h("h3", { id: "date-picker-title" }, "Event dates"),
-        h(
+        createElementTree("h3", { id: "date-picker-title" }, "Event dates"),
+        createElementTree(
           "button",
           {
             type: "button",
@@ -198,29 +202,29 @@ export function createDateFilter(root, { onChange, now = new Date() }) {
             "aria-label": "Close calendar",
             onclick: () => {
               close();
-              trigger.focus();
+              triggerButton.focus();
             },
           },
           "×",
         ),
       ),
-      h(
+      createElementTree(
         "div",
         { class: "date-picker__modes", "aria-label": "Date selection mode" },
         modeButton("multiple", "Multiple dates"),
         modeButton("range", "Date range"),
       ),
-      h(
+      createElementTree(
         "p",
         { class: "date-picker__hint" },
         draft.mode === "multiple"
           ? "Select one or more days. Click again to deselect."
           : "Select the first and last day of your range.",
       ),
-      h(
+      createElementTree(
         "div",
         { class: "date-picker__month" },
-        h(
+        createElementTree(
           "button",
           {
             type: "button",
@@ -229,7 +233,7 @@ export function createDateFilter(root, { onChange, now = new Date() }) {
           },
           "‹",
         ),
-        h(
+        createElementTree(
           "span",
           { "aria-live": "polite" },
           new Intl.DateTimeFormat("en-US", {
@@ -237,7 +241,7 @@ export function createDateFilter(root, { onChange, now = new Date() }) {
             year: "numeric",
           }).format(month),
         ),
-        h(
+        createElementTree(
           "button",
           {
             type: "button",
@@ -247,34 +251,34 @@ export function createDateFilter(root, { onChange, now = new Date() }) {
           "›",
         ),
       ),
-      h(
+      createElementTree(
         "div",
         { class: "date-picker__weekdays", "aria-hidden": "true" },
-        ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) =>
-          h("span", null, d),
+        ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((weekdayLabel) =>
+          createElementTree("span", null, weekdayLabel),
         ),
       ),
-      h(
+      createElementTree(
         "div",
         { class: "date-picker__days", "aria-label": "Choose dates" },
-        cells,
+        calendarCells,
       ),
       draft.mode === "range" &&
-        h(
+        createElementTree(
           "div",
           { class: "date-picker__range" },
           ...["start", "end"].map((field) =>
-            h(
+            createElementTree(
               "label",
               null,
               field === "start" ? "Start date" : "End date",
-              h("input", {
+              createElementTree("input", {
                 type: "date",
                 value: draft[field],
                 min: field === "end" ? draft.start : null,
                 onchange: (event) => {
                   draft[field] = event.target.value;
-                  draw();
+                  renderCalendarMonth();
                   picker
                     .querySelectorAll("input")
                     [field === "start" ? 0 : 1]?.focus();
@@ -283,11 +287,15 @@ export function createDateFilter(root, { onChange, now = new Date() }) {
             ),
           ),
         ),
-      h("p", { class: "date-picker__summary", role: "status" }, summary),
-      h(
+      createElementTree(
+        "p",
+        { class: "date-picker__summary", role: "status" },
+        selectionSummary,
+      ),
+      createElementTree(
         "div",
         { class: "date-picker__actions" },
-        h(
+        createElementTree(
           "button",
           {
             type: "button",
@@ -295,22 +303,22 @@ export function createDateFilter(root, { onChange, now = new Date() }) {
             onclick: () => {
               close();
               onChange(null);
-              trigger.focus();
+              triggerButton.focus();
             },
           },
           "Clear",
         ),
-        h(
+        createElementTree(
           "button",
           {
             type: "button",
             class: "btn btn--gold",
             disabled: !valid,
             onclick: () => {
-              const next = { ...draft, dates: [...draft.dates] };
+              const nextDraft = { ...draft, dates: [...draft.dates] };
               close();
-              onChange(next);
-              trigger.focus();
+              onChange(nextDraft);
+              triggerButton.focus();
             },
           },
           "Apply",
@@ -326,12 +334,12 @@ export function createDateFilter(root, { onChange, now = new Date() }) {
       : selection.mode === "range"
         ? `${formatDay(selection.start)} – ${formatDay(selection.end)}`
         : selection.dates.map(formatDay).join(", ");
-    trigger.setAttribute(
+    triggerButton.setAttribute(
       "aria-label",
       !selection ? label : `Filter event dates: ${label}`,
     );
-    trigger.title = label;
-    trigger.classList.toggle(
+    triggerButton.title = label;
+    triggerButton.classList.toggle(
       "date-filter__trigger--active",
       Boolean(selection),
     );

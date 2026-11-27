@@ -55,21 +55,22 @@ describe("date picker", () => {
     root.querySelector(".date-filter__trigger").click();
     return { root, onChange, view };
   };
-  const day = (root, key) => root.querySelector(`[data-date="${key}"]`).click();
-  const apply = (root) =>
+  const clickDay = (root, key) =>
+    root.querySelector(`[data-date="${key}"]`).click();
+  const clickApplyButton = (root) =>
     [...root.querySelectorAll("button")]
-      .find((b) => b.textContent === "Apply")
+      .find((button) => button.textContent === "Apply")
       .click();
 
   it("keeps a cross-month multi-selection as a draft until Apply", () => {
     const { root, onChange } = setup();
-    day(root, "2026-11-21");
-    day(root, "2026-11-22");
-    day(root, "2026-11-22");
+    clickDay(root, "2026-11-21");
+    clickDay(root, "2026-11-22");
+    clickDay(root, "2026-11-22");
     root.querySelector('[aria-label="Next month"]').click();
-    day(root, "2026-12-02");
+    clickDay(root, "2026-12-02");
     expect(onChange).not.toHaveBeenCalled();
-    apply(root);
+    clickApplyButton(root);
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({
         mode: "multiple",
@@ -82,14 +83,14 @@ describe("date picker", () => {
   it("supports reverse-order range clicks and requires a completed range", () => {
     const { root, onChange } = setup();
     root.querySelector('[data-mode="range"]').click();
-    day(root, "2026-11-25");
+    clickDay(root, "2026-11-25");
     expect(
       [...root.querySelectorAll("button")].find(
-        (b) => b.textContent === "Apply",
+        (button) => button.textContent === "Apply",
       ).disabled,
     ).toBe(true);
-    day(root, "2026-11-21");
-    apply(root);
+    clickDay(root, "2026-11-21");
+    clickApplyButton(root);
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({
         mode: "range",
@@ -114,18 +115,18 @@ describe("date picker", () => {
     );
     expect(
       [...root.querySelectorAll("button")].find(
-        (b) => b.textContent === "Apply",
+        (button) => button.textContent === "Apply",
       ).disabled,
     ).toBe(true);
     [...root.querySelectorAll("button")]
-      .find((b) => b.textContent === "Clear")
+      .find((button) => button.textContent === "Clear")
       .click();
     expect(onChange).toHaveBeenCalledWith(null);
   });
 
   it("Escape closes without applying draft changes", () => {
     const { root, onChange } = setup();
-    day(root, "2026-11-21");
+    clickDay(root, "2026-11-21");
     root
       .querySelector("#event-date-picker")
       .dispatchEvent(

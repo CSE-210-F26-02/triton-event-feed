@@ -5,7 +5,7 @@
  * (e.g. Overture/Protomaps) without code changes.
  * @module views/mapView
  */
-import { h } from "../dom.js";
+import { createElementTree } from "../dom.js";
 import { coordsOf } from "../filters.js";
 import { formatTimeWindow } from "../format.js";
 
@@ -43,21 +43,21 @@ export function assertMapConfig(config) {
 /**
  * Pure: events → marker descriptors (only events with valid coordinates).
  * @param {object[]} events
- * @param {{locale?: string, timeZone?: string}} [opts]
+ * @param {{locale?: string, timeZone?: string}} [options]
  * @returns {{uri: string, lat: number, lng: number, title: string, subtitle: string}[]}
  */
-export function buildMarkers(events, opts = {}) {
-  return (events || []).flatMap((ev) => {
-    const c = coordsOf(ev);
-    if (!c) return [];
-    const when = formatTimeWindow(ev.startsAt, ev.endsAt, opts);
+export function buildMarkers(events, options = {}) {
+  return (events || []).flatMap((event) => {
+    const coordinates = coordsOf(event);
+    if (!coordinates) return [];
+    const when = formatTimeWindow(event.startsAt, event.endsAt, options);
     return [
       {
-        uri: ev.uri,
-        lat: c.lat,
-        lng: c.lng,
-        title: ev.name,
-        subtitle: `${when} · ${ev.location?.name ?? ""}`,
+        uri: event.uri,
+        lat: coordinates.lat,
+        lng: coordinates.lng,
+        title: event.name,
+        subtitle: `${when} · ${event.location?.name ?? ""}`,
       },
     ];
   });
@@ -66,7 +66,8 @@ export function buildMarkers(events, opts = {}) {
 let leafletPromise = null;
 
 /**
- * Inject Leaflet's CSS + script once and resolve with window.L.
+ * Inject Leaflet's CSS + script once and resolve with the library (Leaflet defines
+ * itself as the global `window.L`; that name is the library's, not ours).
  * @param {MapConfig} config
  * @returns {Promise<any>}
  */
@@ -74,9 +75,12 @@ export function loadLeaflet(config) {
   if (globalThis.L) return Promise.resolve(globalThis.L);
   leafletPromise ??= new Promise((resolve, reject) => {
     document.head.append(
-      h("link", { rel: "stylesheet", href: config.leafletCss }),
+      createElementTree("link", { rel: "stylesheet", href: config.leafletCss }),
     );
-    const script = h("script", { src: config.leafletJs, async: true });
+    const script = createElementTree("script", {
+      src: config.leafletJs,
+      async: true,
+    });
     script.onload = () => resolve(globalThis.L);
     script.onerror = () => {
       leafletPromise = null;
@@ -92,12 +96,12 @@ export function loadLeaflet(config) {
  * Create the map view.
  * @param {HTMLElement} root
  * @param {{config: MapConfig, onOpen?: (uri: string) => void,
- *   load?: (c: MapConfig) => Promise<any>}} opts
+ *   load?: (mapConfig: MapConfig) => Promise<any>}} opts
  * @returns {{show(events: object[]): Promise<void>}}
  * @throws {TypeError} when the map config is incomplete
  */
 export function createMapView(root, { onOpen, config, load = loadLeaflet }) {
-  const cfg = assertMapConfig(config);
+  const mapConfig = assertMapConfig(config);
   let map = null;
   let layer = null;
   let leaflet = null;
@@ -107,49 +111,58 @@ export function createMapView(root, { onOpen, config, load = loadLeaflet }) {
   async function ensureMap() {
     if (map) return map;
     if (!initializing) {
-      root.replaceChildren(h("p", { role: "status" }, "Loading map…"));
+      root.replaceChildren(
+        createElementTree("p", { role: "status" }, "Loading map…"),
+      );
       initializing = (async () => {
-        const L = await load(cfg);
-        leaflet = L;
-        const el = h("div", {
+        leaflet = await load(mapConfig);
+        const mapContainer = createElementTree("div", {
           class: "map",
           role: "region",
           "aria-label": "Event map",
         });
         root.replaceChildren(
-          el,
-          h(
+          mapContainer,
+          createElementTree(
             "p",
             { class: "visually-hidden" },
             "All events are also available in the adjacent event list.",
           ),
         );
-        map = L.map(el).setView(cfg.center, cfg.zoom);
-        L.tileLayer(cfg.tileUrl, {
-          maxZoom: cfg.maxZoom,
-          attribution: cfg.attribution,
-        }).addTo(map);
-        layer = L.layerGroup().addTo(map);
+        map = leaflet
+          .map(mapContainer)
+          .setView(mapConfig.center, mapConfig.zoom);
+        leaflet
+          .tileLayer(mapConfig.tileUrl, {
+            maxZoom: mapConfig.maxZoom,
+            attribution: mapConfig.attribution,
+          })
+          .addTo(map);
+        layer = leaflet.layerGroup().addTo(map);
         return map;
-      })().catch((err) => {
+      })().catch((error) => {
         initializing = null;
-        throw err;
+        throw error;
       });
     }
     return initializing;
   }
 
-  function popup(m) {
-    return h(
+  function popup(markerInfo) {
+    return createElementTree(
       "div",
       null,
-      h("strong", null, m.title),
-      h("br"),
-      h("span", null, m.subtitle),
-      h("br"),
-      h(
+      createElementTree("strong", null, markerInfo.title),
+      createElementTree("br"),
+      createElementTree("span", null, markerInfo.subtitle),
+      createElementTree("br"),
+      createElementTree(
         "button",
-        { type: "button", class: "btn", onclick: () => onOpen?.(m.uri) },
+        {
+          type: "button",
+          class: "btn",
+          onclick: () => onOpen?.(markerInfo.uri),
+        },
         "Details",
       ),
     );
@@ -162,7 +175,7 @@ export function createMapView(root, { onOpen, config, load = loadLeaflet }) {
     } catch {
       if (sequence !== renderSequence) return;
       root.replaceChildren(
-        h(
+        createElementTree(
           "p",
           { class: "notice notice--error", role: "alert" },
           "The map could not load (poor connection?). The list view still works.",
@@ -171,17 +184,17 @@ export function createMapView(root, { onOpen, config, load = loadLeaflet }) {
       return;
     }
     if (sequence !== renderSequence) return;
-    const L = leaflet;
     layer.clearLayers();
     const markers = buildMarkers(events);
-    for (const m of markers)
-      L.marker([m.lat, m.lng], { title: m.title })
-        .bindPopup(popup(m))
+    for (const markerInfo of markers)
+      leaflet
+        .marker([markerInfo.lat, markerInfo.lng], { title: markerInfo.title })
+        .bindPopup(popup(markerInfo))
         .addTo(layer);
     map.invalidateSize();
     if (markers.length)
       map.fitBounds(
-        markers.map((m) => [m.lat, m.lng]),
+        markers.map((markerInfo) => [markerInfo.lat, markerInfo.lng]),
         { maxZoom: 17, padding: [24, 24] },
       );
   }
@@ -193,7 +206,7 @@ export function createMapView(root, { onOpen, config, load = loadLeaflet }) {
  * Small single-pin map used inside the event detail pane. Shares the Leaflet loader
  * (and therefore the browser's tile cache) with the main map.
  * @param {HTMLElement} root container; must be in the document before show() resolves
- * @param {{config: MapConfig, load?: (c: MapConfig) => Promise<any>}} opts
+ * @param {{config: MapConfig, load?: (mapConfig: MapConfig) => Promise<any>}} options
  * @returns {{show(event: object): Promise<void>, destroy(): void}}
  * @throws {TypeError} when the map config is incomplete
  */
@@ -207,7 +220,7 @@ export function createPinMap(root, { config, load = loadLeaflet }) {
     const coords = coordsOf(event);
     if (!coords) {
       root.replaceChildren(
-        h(
+        createElementTree(
           "p",
           { class: "muted detail__map-note" },
           "No map pin for this location.",
@@ -215,14 +228,16 @@ export function createPinMap(root, { config, load = loadLeaflet }) {
       );
       return;
     }
-    root.replaceChildren(h("p", { role: "status" }, "Loading map…"));
-    let L;
+    root.replaceChildren(
+      createElementTree("p", { role: "status" }, "Loading map…"),
+    );
+    let leaflet;
     try {
-      L = await load(mapConfig);
+      leaflet = await load(mapConfig);
     } catch {
       if (!destroyed)
         root.replaceChildren(
-          h(
+          createElementTree(
             "p",
             { class: "notice notice--error", role: "alert" },
             "The map could not load.",
@@ -231,18 +246,22 @@ export function createPinMap(root, { config, load = loadLeaflet }) {
       return;
     }
     if (destroyed) return;
-    const mapElement = h("div", {
+    const mapElement = createElementTree("div", {
       class: "map",
       role: "img",
       "aria-label": `Map showing ${event.location?.name ?? "the event location"}`,
     });
     root.replaceChildren(mapElement);
-    pinMap = L.map(mapElement).setView([coords.lat, coords.lng], 17);
-    L.tileLayer(mapConfig.tileUrl, {
-      maxZoom: mapConfig.maxZoom,
-      attribution: mapConfig.attribution,
-    }).addTo(pinMap);
-    L.marker([coords.lat, coords.lng], { title: event.name }).addTo(pinMap);
+    pinMap = leaflet.map(mapElement).setView([coords.lat, coords.lng], 17);
+    leaflet
+      .tileLayer(mapConfig.tileUrl, {
+        maxZoom: mapConfig.maxZoom,
+        attribution: mapConfig.attribution,
+      })
+      .addTo(pinMap);
+    leaflet
+      .marker([coords.lat, coords.lng], { title: event.name })
+      .addTo(pinMap);
     pinMap.invalidateSize();
   }
 

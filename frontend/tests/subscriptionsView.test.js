@@ -12,19 +12,20 @@ import { SUBSCRIBED_LABEL } from "../src/views/subscribeButton.js";
 import { lexiconEventView } from "./helpers.js";
 
 const NOW = new Date("2026-12-01T00:00:00Z");
-const uriOf = (rkey) => `at://did:plc:host/app.communitymap.event/${rkey}`;
+const eventUriFor = (recordKey) =>
+  `at://did:plc:host/app.communitymap.event/${recordKey}`;
 
 /** An upcoming event (full fixture) with its own URI and start time. */
-const upcoming = (rkey, startsAt, name = rkey) =>
+const upcoming = (recordKey, startsAt, name = recordKey) =>
   lexiconEventView(fullFixture.record, {
-    uri: uriOf(rkey),
+    uri: eventUriFor(recordKey),
     name,
     startsAt,
     endsAt: "2026-12-20T00:00:00.000Z",
   });
-const ended = (rkey) =>
+const ended = (recordKey) =>
   lexiconEventView(fullFixture.record, {
-    uri: uriOf(rkey),
+    uri: eventUriFor(recordKey),
     startsAt: "2026-11-01T00:00:00.000Z",
     endsAt: "2026-11-02T00:00:00.000Z",
   });
@@ -36,46 +37,51 @@ describe("partitionSubscriptions", () => {
     const loaded = new Map([
       [later.uri, { event: later }],
       [sooner.uri, { event: sooner }],
-      [uriOf("old"), { event: ended("old") }],
+      [eventUriFor("old"), { event: ended("old") }],
     ]);
-    const parts = partitionSubscriptions(
-      [later.uri, sooner.uri, uriOf("old")],
+    const partition = partitionSubscriptions(
+      [later.uri, sooner.uri, eventUriFor("old")],
       loaded,
       NOW,
     );
-    expect(parts.upcoming.map((ev) => ev.uri)).toEqual([sooner.uri, later.uri]);
-    expect(parts).toMatchObject({ unavailable: [], loading: 0 });
+    expect(partition.upcoming.map((event) => event.uri)).toEqual([
+      sooner.uri,
+      later.uri,
+    ]);
+    expect(partition).toMatchObject({ unavailable: [], loading: 0 });
   });
 
   it("separates unavailable (gone / failed) and still-loading URIs", () => {
     const loaded = new Map([
-      [uriOf("gone"), { gone: true }],
-      [uriOf("failed"), { failed: true }],
+      [eventUriFor("gone"), { gone: true }],
+      [eventUriFor("failed"), { failed: true }],
     ]);
-    const parts = partitionSubscriptions(
-      [uriOf("gone"), uriOf("failed"), uriOf("pending")],
+    const partition = partitionSubscriptions(
+      [eventUriFor("gone"), eventUriFor("failed"), eventUriFor("pending")],
       loaded,
       NOW,
     );
-    expect(parts).toEqual({
+    expect(partition).toEqual({
       upcoming: [],
-      unavailable: [uriOf("gone"), uriOf("failed")],
+      unavailable: [eventUriFor("gone"), eventUriFor("failed")],
       loading: 1,
     });
   });
 
   it("puts events with unusable start times last", () => {
     const broken = upcoming("x", "whenever");
-    const fine = upcoming("y", "2026-12-05T00:00:00.000Z");
+    const datedEvent = upcoming("y", "2026-12-05T00:00:00.000Z");
     const loaded = new Map([
       [broken.uri, { event: broken }],
-      [fine.uri, { event: fine }],
+      [datedEvent.uri, { event: datedEvent }],
     ]);
     expect(
-      partitionSubscriptions([broken.uri, fine.uri], loaded, NOW).upcoming.map(
-        (ev) => ev.uri,
-      ),
-    ).toEqual([fine.uri, broken.uri]);
+      partitionSubscriptions(
+        [broken.uri, datedEvent.uri],
+        loaded,
+        NOW,
+      ).upcoming.map((event) => event.uri),
+    ).toEqual([datedEvent.uri, broken.uri]);
   });
 });
 
@@ -118,8 +124,8 @@ describe("loadSubscribedEvent", () => {
 
   it.each([null, "event", [], undefined])(
     "treats a non-object response (%j) as gone",
-    async (data) => {
-      const api = { getEvent: vi.fn(async () => ({ data })) };
+    async (responseData) => {
+      const api = { getEvent: vi.fn(async () => ({ data: responseData })) };
       await expect(
         loadSubscribedEvent(event.uri, { api, findEvent: () => null }),
       ).resolves.toEqual({ gone: true });
@@ -133,8 +139,8 @@ describe("createSubscriptionsView", () => {
     const root = document.createElement("div");
     document.body.replaceChildren(root);
     const state = { subscribed: new Set(subscribed), loggedIn };
-    const byUri = new Map(events.map((ev) => [ev.uri, ev]));
-    const deps = {
+    const byUri = new Map(events.map((event) => [event.uri, event]));
+    const dependencies = {
       api: {
         getEvent: vi.fn(async (uri) => {
           if (byUri.has(uri)) return { data: byUri.get(uri) };
@@ -150,15 +156,29 @@ describe("createSubscriptionsView", () => {
       onUnsubscribe: vi.fn(),
       now: () => NOW,
     };
-    return { root, state, deps, view: createSubscriptionsView(root, deps) };
+    return {
+      root,
+      state,
+      deps: dependencies,
+      view: createSubscriptionsView(root, dependencies),
+    };
   }
 
   const titles = (root) =>
-    [...root.querySelectorAll(".card h3")].map((h) => h.textContent);
+    [...root.querySelectorAll(".card h3")].map(
+      (heading) => heading.textContent,
+    );
 
   it("lists subscribed upcoming events with Subscribed ✓ toggles", async () => {
-    const a = upcoming("a", "2026-12-05T00:00:00.000Z", "Taco night");
-    const { root, view, deps } = setup({ events: [a], subscribed: [a.uri] });
+    const tacoNight = upcoming("a", "2026-12-05T00:00:00.000Z", "Taco night");
+    const {
+      root,
+      view,
+      deps: dependencies,
+    } = setup({
+      events: [tacoNight],
+      subscribed: [tacoNight.uri],
+    });
     await view.open();
     expect(root.querySelector("#subscriptions-title").textContent).toBe(
       "My subscriptions",
@@ -170,7 +190,7 @@ describe("createSubscriptionsView", () => {
     const toggle = root.querySelector("[data-action=subscribe]");
     expect(toggle.textContent).toBe(SUBSCRIBED_LABEL);
     toggle.click();
-    expect(deps.onToggleSubscribe).toHaveBeenCalledWith(a);
+    expect(dependencies.onToggleSubscribe).toHaveBeenCalledWith(tacoNight);
     expect(root.querySelector(".card h3").id).toMatch(/^sub-/);
   });
 
@@ -182,66 +202,98 @@ describe("createSubscriptionsView", () => {
   });
 
   it("asks logged-out users to log in, without fetching", async () => {
-    const { root, view, deps } = setup({
+    const {
+      root,
+      view,
+      deps: dependencies,
+    } = setup({
       loggedIn: false,
-      subscribed: [uriOf("a")],
+      subscribed: [eventUriFor("a")],
     });
     await view.open();
     expect(root.textContent).toContain(LOGGED_OUT_TEXT);
     root.querySelector("[data-action=login]").click();
-    expect(deps.onLogin).toHaveBeenCalled();
-    expect(deps.api.getEvent).not.toHaveBeenCalled();
+    expect(dependencies.onLogin).toHaveBeenCalled();
+    expect(dependencies.api.getEvent).not.toHaveBeenCalled();
   });
 
   it("lists events that couldn't be loaded, with an Unsubscribe button", async () => {
-    const { root, view, deps } = setup({ subscribed: [uriOf("deleted")] });
+    const {
+      root,
+      view,
+      deps: dependencies,
+    } = setup({ subscribed: [eventUriFor("deleted")] });
     await view.open();
     expect(root.textContent).toContain(UNAVAILABLE_TITLE);
     root.querySelector("[data-action=unsubscribe]").click();
-    expect(deps.onUnsubscribe).toHaveBeenCalledWith(uriOf("deleted"));
+    expect(dependencies.onUnsubscribe).toHaveBeenCalledWith(
+      eventUriFor("deleted"),
+    );
     root.querySelector(".subscriptions__unavailable .linklike").click();
-    expect(deps.onOpen).toHaveBeenCalledWith(uriOf("deleted"));
+    expect(dependencies.onOpen).toHaveBeenCalledWith(eventUriFor("deleted"));
   });
 
   it("hides ended events (the page lists upcoming events)", async () => {
-    const old = ended("old");
-    const { root, view } = setup({ events: [old], subscribed: [old.uri] });
+    const endedEvent = ended("old");
+    const { root, view } = setup({
+      events: [endedEvent],
+      subscribed: [endedEvent.uri],
+    });
     await view.open();
     expect(titles(root)).toEqual([]);
     expect(root.querySelector(".empty")).not.toBeNull();
   });
 
   it("refresh() drops unsubscribed events without refetching the rest", async () => {
-    const a = upcoming("a", "2026-12-05T00:00:00.000Z", "A");
-    const b = upcoming("b", "2026-12-06T00:00:00.000Z", "B");
-    const { root, view, deps, state } = setup({
-      events: [a, b],
-      subscribed: [a.uri, b.uri],
+    const firstEvent = upcoming("a", "2026-12-05T00:00:00.000Z", "A");
+    const secondEvent = upcoming("b", "2026-12-06T00:00:00.000Z", "B");
+    const {
+      root,
+      view,
+      deps: dependencies,
+      state,
+    } = setup({
+      events: [firstEvent, secondEvent],
+      subscribed: [firstEvent.uri, secondEvent.uri],
     });
     await view.open();
     expect(titles(root)).toEqual(["A", "B"]);
-    state.subscribed = new Set([b.uri]);
+    state.subscribed = new Set([secondEvent.uri]);
     await view.refresh();
     expect(titles(root)).toEqual(["B"]);
-    expect(deps.api.getEvent).toHaveBeenCalledTimes(2);
+    expect(dependencies.api.getEvent).toHaveBeenCalledTimes(2);
   });
 
   it("does not fetch the same event twice when refreshed mid-load", async () => {
-    const a = upcoming("a", "2026-12-05T00:00:00.000Z", "A");
-    const { root, view, deps } = setup({ events: [a], subscribed: [a.uri] });
+    const onlyEvent = upcoming("a", "2026-12-05T00:00:00.000Z", "A");
+    const {
+      root,
+      view,
+      deps: dependencies,
+    } = setup({
+      events: [onlyEvent],
+      subscribed: [onlyEvent.uri],
+    });
     const opening = view.open();
     await view.refresh(); // e.g. a store change while the first fetch is in flight
     await opening;
-    expect(deps.api.getEvent).toHaveBeenCalledTimes(1);
+    expect(dependencies.api.getEvent).toHaveBeenCalledTimes(1);
     expect(titles(root)).toEqual(["A"]);
   });
 
   it("does nothing while closed, and close() clears the pane", async () => {
-    const a = upcoming("a", "2026-12-05T00:00:00.000Z");
-    const { root, view, deps } = setup({ events: [a], subscribed: [a.uri] });
+    const onlyEvent = upcoming("a", "2026-12-05T00:00:00.000Z");
+    const {
+      root,
+      view,
+      deps: dependencies,
+    } = setup({
+      events: [onlyEvent],
+      subscribed: [onlyEvent.uri],
+    });
     await view.refresh();
     expect(root.children).toHaveLength(0);
-    expect(deps.api.getEvent).not.toHaveBeenCalled();
+    expect(dependencies.api.getEvent).not.toHaveBeenCalled();
     await view.open();
     expect(view.isOpen).toBe(true);
     view.close();
@@ -250,8 +302,11 @@ describe("createSubscriptionsView", () => {
   });
 
   it("ignores events that arrive after the page was closed", async () => {
-    const a = upcoming("a", "2026-12-05T00:00:00.000Z");
-    const { root, view } = setup({ events: [a], subscribed: [a.uri] });
+    const onlyEvent = upcoming("a", "2026-12-05T00:00:00.000Z");
+    const { root, view } = setup({
+      events: [onlyEvent],
+      subscribed: [onlyEvent.uri],
+    });
     const opening = view.open();
     view.close();
     await opening;
@@ -259,11 +314,11 @@ describe("createSubscriptionsView", () => {
   });
 
   it("Back returns to the map", async () => {
-    const { root, view, deps } = setup();
+    const { root, view, deps: dependencies } = setup();
     await view.open();
     [...root.querySelectorAll("button")]
-      .find((b) => b.textContent.includes("Back"))
+      .find((button) => button.textContent.includes("Back"))
       .click();
-    expect(deps.onClose).toHaveBeenCalled();
+    expect(dependencies.onClose).toHaveBeenCalled();
   });
 });

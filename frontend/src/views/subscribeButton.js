@@ -8,7 +8,7 @@
  * on the detail page, visible help text linked with aria-describedby.
  * @module views/subscribeButton
  */
-import { h } from "../dom.js";
+import { createElementTree } from "../dom.js";
 
 export const SUBSCRIBE_LABEL = "Subscribe";
 export const SUBSCRIBED_LABEL = "Subscribed ✓";
@@ -40,14 +40,14 @@ const VARIANT_CLASS = Object.freeze({ primary: "btn--primary", plain: "" });
 /**
  * Render the toggle for one event, or null when it should not be shown.
  * @param {object} event EventView (passed back to onToggle, so it keeps its cid)
- * @param {SubscribeButtonOpts} [opts]
+ * @param {SubscribeButtonOpts} [options]
  * @returns {HTMLButtonElement|null}
  */
-export function renderSubscribeButton(event, opts = {}) {
-  const subscribed = Boolean(opts.subscribed);
-  if (opts.ended && !subscribed) return null;
-  const variant = VARIANT_CLASS[opts.variant] ?? VARIANT_CLASS.primary;
-  return h(
+export function renderSubscribeButton(event, options = {}) {
+  const subscribed = Boolean(options.subscribed);
+  if (options.ended && !subscribed) return null;
+  const variant = VARIANT_CLASS[options.variant] ?? VARIANT_CLASS.primary;
+  return createElementTree(
     "button",
     {
       type: "button",
@@ -56,9 +56,9 @@ export function renderSubscribeButton(event, opts = {}) {
       title: subscribed
         ? `${UNSUBSCRIBE_HINT} ${SUBSCRIPTION_PRIVACY_NOTE}`
         : SUBSCRIPTION_PRIVACY_NOTE,
-      "aria-describedby": opts.describedBy,
-      dataset: { action: "subscribe", ...opts.dataset },
-      onclick: () => opts.onToggle?.(event),
+      "aria-describedby": options.describedBy,
+      dataset: { action: "subscribe", ...options.dataset },
+      onclick: () => options.onToggle?.(event),
     },
     subscribed ? SUBSCRIBED_LABEL : SUBSCRIBE_LABEL,
   );
@@ -70,4 +70,8 @@ export function renderSubscribeButton(event, opts = {}) {
  * @returns {HTMLElement}
  */
 export const renderPrivacyNote = (id = PRIVACY_NOTE_ID) =>
-  h("p", { id, class: "hint detail__privacy" }, SUBSCRIPTION_PRIVACY_NOTE);
+  createElementTree(
+    "p",
+    { id, class: "hint detail__privacy" },
+    SUBSCRIPTION_PRIVACY_NOTE,
+  );

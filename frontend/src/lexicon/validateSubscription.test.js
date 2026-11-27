@@ -22,15 +22,18 @@ const fixturesDir = fileURLToPath(
 
 const EVENT_URI =
   "at://did:plc:7iza6de2dwap2sbkpav7c6c6/app.communitymap.event/3lbxq7k2mzs2a";
-const CID = "bafyreihooyosut5ztb3xty23uwoyij5ovnqr5qldanntxmah33quatfwoy";
+const EVENT_CID = "bafyreihooyosut5ztb3xty23uwoyij5ovnqr5qldanntxmah33quatfwoy";
 
 /** Reads every .json fixture in fixtures/subscription/<folder>/ as [fileName, data]. */
 function loadFixtures(folder) {
-  const dir = join(fixturesDir, folder);
-  return readdirSync(dir)
+  const fixtureFolder = join(fixturesDir, folder);
+  return readdirSync(fixtureFolder)
     .filter((file) => file.endsWith(".json"))
     .sort()
-    .map((file) => [file, JSON.parse(readFileSync(join(dir, file), "utf8"))]);
+    .map((file) => [
+      file,
+      JSON.parse(readFileSync(join(fixtureFolder, file), "utf8")),
+    ]);
 }
 
 const validFixtures = loadFixtures("valid");
@@ -54,9 +57,11 @@ describe("validateSubscription: invalid fixtures", () => {
   it.each(invalidFixtures)("%s", (_file, fixture) => {
     const result = validateSubscription(fixture.record);
     expect(result.ok).toBe(false);
-    const messages = result.errors.map((e) => e.message);
+    const messages = result.errors.map((issue) => issue.message);
     expect(
-      messages.some((m) => m.includes(fixture.expectedErrorContains)),
+      messages.some((message) =>
+        message.includes(fixture.expectedErrorContains),
+      ),
       `expected an error containing "${fixture.expectedErrorContains}", got: ${JSON.stringify(messages)}`,
     ).toBe(true);
   });
@@ -72,7 +77,7 @@ describe("validateSubscription: edge cases", () => {
 
   it("rejects a record with the wrong $type", () => {
     const result = validateSubscription({
-      ...buildSubscriptionRecord({ uri: EVENT_URI, cid: CID }),
+      ...buildSubscriptionRecord({ uri: EVENT_URI, cid: EVENT_CID }),
       $type: "app.bsky.feed.like",
     });
     expect(result.ok).toBe(false);
@@ -82,7 +87,7 @@ describe("validateSubscription: edge cases", () => {
     const result = validateSubscription(
       buildSubscriptionRecord({
         uri: "at://did:plc:abc/app.communitymap.event",
-        cid: CID,
+        cid: EVENT_CID,
       }),
     );
     expect(result.ok).toBe(false);
@@ -92,7 +97,7 @@ describe("validateSubscription: edge cases", () => {
     const result = validateSubscription(
       buildSubscriptionRecord({
         uri: "at://did:plc:abc/app.communitymap.group/3kabc",
-        cid: CID,
+        cid: EVENT_CID,
       }),
     );
     expect(result).toEqual({
@@ -117,12 +122,12 @@ describe("validateSubscription: edge cases", () => {
 describe("buildSubscriptionRecord", () => {
   it("builds a valid record from an EventView's uri and cid", () => {
     const record = buildSubscriptionRecord(
-      { uri: EVENT_URI, cid: CID, name: "ignored" },
+      { uri: EVENT_URI, cid: EVENT_CID, name: "ignored" },
       "2026-11-26T18:00:00.000Z",
     );
     expect(record).toEqual({
       $type: SUBSCRIPTION_NSID,
-      subject: { uri: EVENT_URI, cid: CID },
+      subject: { uri: EVENT_URI, cid: EVENT_CID },
       createdAt: "2026-11-26T18:00:00.000Z",
     });
     expect(validateSubscription(record)).toEqual({ ok: true });
@@ -130,7 +135,10 @@ describe("buildSubscriptionRecord", () => {
 
   it("defaults createdAt to now", () => {
     const before = Date.now();
-    const { createdAt } = buildSubscriptionRecord({ uri: EVENT_URI, cid: CID });
+    const { createdAt } = buildSubscriptionRecord({
+      uri: EVENT_URI,
+      cid: EVENT_CID,
+    });
     expect(Date.parse(createdAt)).toBeGreaterThanOrEqual(before);
   });
 

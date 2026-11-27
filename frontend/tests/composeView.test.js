@@ -35,7 +35,7 @@ describe("records", () => {
   });
 
   it("builds a lexicon-shaped record: strings for lat/lng, omits empties, ISO createdAt", () => {
-    const r = buildEventRecord({
+    const record = buildEventRecord({
       name: " X ",
       startsAt: "s",
       endsAt: "e",
@@ -45,15 +45,15 @@ describe("records", () => {
       tags: "",
       group: "",
     });
-    expect(r).toEqual({
+    expect(record).toEqual({
       $type: "app.communitymap.event",
       name: "X",
       startsAt: "s",
       endsAt: "e",
       location: { name: "L", lat: "32.5", lng: "-117" },
-      createdAt: r.createdAt,
+      createdAt: record.createdAt,
     });
-    expect(new Date(r.createdAt).toISOString()).toBe(r.createdAt);
+    expect(new Date(record.createdAt).toISOString()).toBe(record.createdAt);
   });
 });
 
@@ -91,7 +91,10 @@ describe("compose validation", () => {
   });
 
   it("enforces lexicon lengths and the 10-tag limit", () => {
-    const tags = Array.from({ length: 11 }, (_, i) => `t${i}`).join(",");
+    const tags = Array.from(
+      { length: 11 },
+      (_unusedValue, index) => `t${index}`,
+    ).join(",");
     const { errors } = validateForm({
       ...valid,
       name: "x".repeat(201),
@@ -144,8 +147,8 @@ describe("compose validation", () => {
   });
 
   it("round-trips ISO <-> datetime-local", () => {
-    const iso = new Date(2026, 10, 12, 18, 30).toISOString();
-    expect(localInputToIso(isoToLocalInput(iso))).toBe(iso);
+    const isoDateTime = new Date(2026, 10, 12, 18, 30).toISOString();
+    expect(localInputToIso(isoToLocalInput(isoDateTime))).toBe(isoDateTime);
     expect(localInputToIso("")).toBe("");
   });
 
@@ -175,11 +178,12 @@ describe("compose validation", () => {
 });
 
 describe("compose submit", () => {
-  const fill = (form, values) =>
-    Object.entries(values).forEach(([k, v]) => {
-      form.elements[k].value = v;
+  const fillForm = (form, values) =>
+    Object.entries(values).forEach(([fieldName, fieldValue]) => {
+      form.elements[fieldName].value = fieldValue;
     });
-  const flush = () => new Promise((r) => setTimeout(r, 0));
+  const flush = () =>
+    new Promise((resolveFlush) => setTimeout(resolveFlush, 0));
 
   it("creates the event, then a listener for the hashtag", async () => {
     const writer = {
@@ -192,7 +196,7 @@ describe("compose submit", () => {
     const view = createComposeView({ getWriter: () => writer, onSaved });
     view.open();
     const form = view.element.querySelector("form");
-    fill(form, { ...valid, hashtag: "#StudyJam" });
+    fillForm(form, { ...valid, hashtag: "#StudyJam" });
     form.dispatchEvent(new Event("submit", { cancelable: true }));
     await flush();
     expect(writer.createEvent.mock.calls[0][0]).toMatchObject({
@@ -212,14 +216,14 @@ describe("compose submit", () => {
       createListener: vi.fn(),
     };
     const view = createComposeView({ getWriter: () => writer });
-    const ev = sampleEvent({ createdAt: "2026-11-01T00:00:00.000Z" });
-    view.open(ev);
+    const event = sampleEvent({ createdAt: "2026-11-01T00:00:00.000Z" });
+    view.open(event);
     view.element
       .querySelector("form")
       .dispatchEvent(new Event("submit", { cancelable: true }));
     await flush();
-    const [rkey, record] = writer.updateEvent.mock.calls[0];
-    expect(rkey).toBe("3kabc");
+    const [recordKey, record] = writer.updateEvent.mock.calls[0];
+    expect(recordKey).toBe("3kabc");
     expect(record.createdAt).toBe("2026-11-01T00:00:00.000Z");
     expect(writer.createListener).not.toHaveBeenCalled();
   });

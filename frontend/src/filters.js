@@ -4,14 +4,14 @@
  */
 
 /**
- * @typedef {{tags: string[], group: string, q: string, nearMe: boolean}} FilterState
+ * @typedef {{tags: string[], group: string, searchText: string, nearMe: boolean}} FilterState
  */
 
 /** @type {FilterState} */
 export const EMPTY_FILTERS = Object.freeze({
   tags: [],
   group: "",
-  q: "",
+  searchText: "",
   nearMe: false,
 });
 
@@ -25,8 +25,9 @@ export function buildEventQuery(filters, { cursor = null, limit = 20 } = {}) {
   const params = { limit };
   if (filters.tags?.length) params.tag = [...filters.tags];
   if (filters.group) params.group = filters.group;
-  const q = (filters.q || "").trim();
-  if (q) params.q = q;
+  const searchText = (filters.searchText || "").trim();
+  // "q" is the AppView's name for the search query parameter (GET /api/events?q=).
+  if (searchText) params.q = searchText;
   if (cursor) params.cursor = cursor;
   return params;
 }
@@ -38,7 +39,9 @@ export function buildEventQuery(filters, { cursor = null, limit = 20 } = {}) {
  * @returns {string[]}
  */
 export function toggleTag(tags, tag) {
-  return tags.includes(tag) ? tags.filter((t) => t !== tag) : [...tags, tag];
+  return tags.includes(tag)
+    ? tags.filter((existingTag) => existingTag !== tag)
+    : [...tags, tag];
 }
 
 /**
@@ -47,17 +50,17 @@ export function toggleTag(tags, tag) {
  * @returns {{lat: number, lng: number}|null}
  */
 export function coordsOf(event) {
-  const loc = event?.location;
+  const eventLocation = event?.location;
   if (
-    !loc ||
-    loc.lat == null ||
-    loc.lng == null ||
-    loc.lat === "" ||
-    loc.lng === ""
+    !eventLocation ||
+    eventLocation.lat == null ||
+    eventLocation.lng == null ||
+    eventLocation.lat === "" ||
+    eventLocation.lng === ""
   )
     return null;
-  const lat = Number(loc.lat);
-  const lng = Number(loc.lng);
+  const lat = Number(eventLocation.lat);
+  const lng = Number(eventLocation.lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
   return { lat, lng };
@@ -65,19 +68,21 @@ export function coordsOf(event) {
 
 /**
  * Great-circle distance in km (haversine).
- * @param {{lat: number, lng: number}} a
- * @param {{lat: number, lng: number}} b
+ * @param {{lat: number, lng: number}} pointA
+ * @param {{lat: number, lng: number}} pointB
  * @returns {number}
  */
-export function haversineKm(a, b) {
-  const R = 6371;
-  const rad = (d) => (d * Math.PI) / 180;
-  const dLat = rad(b.lat - a.lat);
-  const dLng = rad(b.lng - a.lng);
-  const s =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+export function haversineKm(pointA, pointB) {
+  const earthRadiusKm = 6371;
+  const toRadians = (degrees) => (degrees * Math.PI) / 180;
+  const latitudeDelta = toRadians(pointB.lat - pointA.lat);
+  const longitudeDelta = toRadians(pointB.lng - pointA.lng);
+  const haversineTerm =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(toRadians(pointA.lat)) *
+      Math.cos(toRadians(pointB.lat)) *
+      Math.sin(longitudeDelta / 2) ** 2;
+  return 2 * earthRadiusKm * Math.asin(Math.min(1, Math.sqrt(haversineTerm)));
 }
 
 /**
@@ -89,26 +94,30 @@ export function haversineKm(a, b) {
  */
 export function sortByDistance(events, origin) {
   return events
-    .map((e, i) => {
-      const c = coordsOf(e);
-      return { e: { ...e, distanceKm: c ? haversineKm(origin, c) : null }, i };
+    .map((event, originalIndex) => {
+      const coordinates = coordsOf(event);
+      const distanceKm = coordinates ? haversineKm(origin, coordinates) : null;
+      return { event: { ...event, distanceKm }, originalIndex };
     })
-    .sort((x, y) => {
-      const dx = x.e.distanceKm ?? Infinity;
-      const dy = y.e.distanceKm ?? Infinity;
-      return dx === dy ? x.i - y.i : dx - dy;
+    .sort((first, second) => {
+      const firstDistance = first.event.distanceKm ?? Infinity;
+      const secondDistance = second.event.distanceKm ?? Infinity;
+      // Equal distances (including "unknown") keep their original order.
+      return firstDistance === secondDistance
+        ? first.originalIndex - second.originalIndex
+        : firstDistance - secondDistance;
     })
-    .map((x) => x.e);
+    .map((entry) => entry.event);
 }
 
 /**
  * Local-date key "YYYY-MM-DD".
- * @param {Date} d
+ * @param {Date} date
  * @returns {string}
  */
-export function dayKey(d) {
-  const p = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+export function dayKey(date) {
+  const padToTwoDigits = (number) => String(number).padStart(2, "0");
+  return `${date.getFullYear()}-${padToTwoDigits(date.getMonth() + 1)}-${padToTwoDigits(date.getDate())}`;
 }
 
 /** Match any event overlapping a selected local calendar day (end is exclusive). */
@@ -142,11 +151,12 @@ export function filterEventsByDate(events, selection) {
  * @returns {string}
  */
 export function dayLabel(day, now, locale) {
-  const startOf = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const diff = Math.round((startOf(day) - startOf(now)) / 86400000);
-  if (diff <= 0) return "Today";
-  if (diff === 1) return "Tomorrow";
-  if (diff < 7)
+  const startOf = (date) =>
+    new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const dayDifference = Math.round((startOf(day) - startOf(now)) / 86400000);
+  if (dayDifference <= 0) return "Today";
+  if (dayDifference === 1) return "Tomorrow";
+  if (dayDifference < 7)
     return new Intl.DateTimeFormat(locale, { weekday: "long" }).format(day);
   return new Intl.DateTimeFormat(locale, {
     weekday: "short",
@@ -159,21 +169,25 @@ export function dayLabel(day, now, locale) {
  * Group events by local day. Events already in progress are grouped under today.
  * Groups are chronological; order within a group is preserved (e.g. distance order).
  * @param {object[]} events
- * @param {{now?: Date, locale?: string}} [opts]
+ * @param {{now?: Date, locale?: string}} [options]
  * @returns {{key: string, label: string, events: object[]}[]}
  */
 export function groupByDay(events, { now = new Date(), locale } = {}) {
   const groups = new Map();
-  for (const ev of events) {
-    const start = new Date(ev.startsAt);
+  for (const event of events) {
+    const start = new Date(event.startsAt);
     const day = start < now ? now : start;
     const key = dayKey(day);
     if (!groups.has(key))
       groups.set(key, { key, label: dayLabel(day, now, locale), events: [] });
-    groups.get(key).events.push(ev);
+    groups.get(key).events.push(event);
   }
-  return [...groups.values()].sort((a, b) =>
-    a.key < b.key ? -1 : a.key > b.key ? 1 : 0,
+  return [...groups.values()].sort((firstGroup, secondGroup) =>
+    firstGroup.key < secondGroup.key
+      ? -1
+      : firstGroup.key > secondGroup.key
+        ? 1
+        : 0,
   );
 }
 

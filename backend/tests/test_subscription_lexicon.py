@@ -1,4 +1,5 @@
-"""Run every shared fixture in fixtures/subscription/ through the validator.
+"""Run every shared fixture in fixtures/subscription/ through
+validate_subscription.
 
 The frontend's Vitest suite runs the same files, so both validators must
 agree on what a valid subscription is.
@@ -18,15 +19,19 @@ FIXTURES_DIR = REPO_ROOT / "fixtures" / "subscription"
 
 EVENT_DID = "did:plc:7iza6de2dwap2sbkpav7c6c6"
 EVENT_URI = f"at://{EVENT_DID}/app.communitymap.event/3lbxq7k2mzs2a"
-CID = "bafyreihooyosut5ztb3xty23uwoyij5ovnqr5qldanntxmah33quatfwoy"
+EVENT_CID = "bafyreihooyosut5ztb3xty23uwoyij5ovnqr5qldanntxmah33quatfwoy"
 
 
 def load_fixtures(folder):
-    """Return a pytest.param per .json file in a fixtures folder."""
+    """Return a pytest.param per .json file in
+    fixtures/subscription/<folder>/."""
     files = sorted((FIXTURES_DIR / folder).glob("*.json"))
     return [
-        pytest.param(json.loads(f.read_text(encoding="utf-8")), id=f.name)
-        for f in files
+        pytest.param(
+            json.loads(fixture_file.read_text(encoding="utf-8")),
+            id=fixture_file.name,
+        )
+        for fixture_file in files
     ]
 
 
@@ -34,7 +39,7 @@ def make_record(**overrides):
     """Build a valid subscription record, with fields replaced by overrides."""
     record = {
         "$type": SUBSCRIPTION_NSID,
-        "subject": {"uri": EVENT_URI, "cid": CID},
+        "subject": {"uri": EVENT_URI, "cid": EVENT_CID},
         "createdAt": "2026-11-26T18:00:00.000Z",
     }
     record.update(overrides)
@@ -60,7 +65,7 @@ def test_invalid_fixture(fixture):
     errors = validate_subscription(fixture["record"])
     expected = fixture["expectedErrorContains"]
     assert any(
-        expected in e for e in errors
+        expected in error for error in errors
     ), f"expected an error containing {expected!r}, got {errors}"
 
 
@@ -85,22 +90,22 @@ def test_rejects_subject_that_is_not_an_object(subject):
     assert errors == ["subject must be an object with uri and cid"]
 
 
-@pytest.mark.parametrize("cid", ["", 5, None])
-def test_rejects_empty_or_non_string_cid(cid):
-    record = make_record(subject={"uri": EVENT_URI, "cid": cid})
+@pytest.mark.parametrize("invalid_cid", ["", 5, None])
+def test_rejects_empty_or_non_string_cid(invalid_cid):
+    record = make_record(subject={"uri": EVENT_URI, "cid": invalid_cid})
     errors = validate_subscription(record)
     assert errors == ["subject.cid must be a non-empty string"]
 
 
 @pytest.mark.parametrize(
-    "uri",
+    "non_event_uri",
     [
         "at://did:plc:abc/app.communitymap.event",
         "at://did:plc:abc/app.communitymap.group/3lbxq7k2mzs2a",
     ],
 )
-def test_rejects_uri_that_is_not_an_event_record(uri):
-    record = make_record(subject={"uri": uri, "cid": CID})
+def test_rejects_uri_that_is_not_an_event_record(non_event_uri):
+    record = make_record(subject={"uri": non_event_uri, "cid": EVENT_CID})
     errors = validate_subscription(record)
     expected = "subject.uri must point at an app.communitymap.event record"
     assert errors == [expected]

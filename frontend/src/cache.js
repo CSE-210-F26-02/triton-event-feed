@@ -12,7 +12,7 @@ import { getStorage, storageGet, storageSet } from "./util.js";
 
 /**
  * Create a cache.
- * @param {{storage?: Storage|null, prefix?: string, now?: () => number}} [opts]
+ * @param {{storage?: Storage|null, prefix?: string, now?: () => number}} [options]
  * @returns {Cache}
  */
 export function createCache({
@@ -20,13 +20,13 @@ export function createCache({
   prefix = "cm:cache:",
   now = Date.now,
 } = {}) {
-  const keyOf = (k) => prefix + k;
+  const keyOf = (key) => prefix + key;
 
   function get(key) {
-    const raw = storageGet(storage, keyOf(key));
-    if (!raw) return null;
+    const storedJson = storageGet(storage, keyOf(key));
+    if (!storedJson) return null;
     try {
-      const entry = JSON.parse(raw);
+      const entry = JSON.parse(storedJson);
       return entry && "value" in entry ? entry : null;
     } catch {
       return null;
@@ -34,10 +34,10 @@ export function createCache({
   }
 
   function set(key, value) {
-    const raw = JSON.stringify({ value, savedAt: now() });
-    if (storageSet(storage, keyOf(key), raw)) return true;
+    const serializedEntry = JSON.stringify({ value, savedAt: now() });
+    if (storageSet(storage, keyOf(key), serializedEntry)) return true;
     clear(); // probably quota: drop our old entries and retry once
-    return storageSet(storage, keyOf(key), raw);
+    return storageSet(storage, keyOf(key), serializedEntry);
   }
 
   function remove(key) {
@@ -46,9 +46,10 @@ export function createCache({
 
   function clear() {
     try {
-      for (let i = storage.length - 1; i >= 0; i--) {
-        const k = storage.key(i);
-        if (k && k.startsWith(prefix)) storage.removeItem(k);
+      for (let index = storage.length - 1; index >= 0; index--) {
+        const storageKey = storage.key(index);
+        if (storageKey && storageKey.startsWith(prefix))
+          storage.removeItem(storageKey);
       }
     } catch {
       /* storage unavailable */

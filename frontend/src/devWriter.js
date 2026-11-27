@@ -6,10 +6,10 @@
 import { EVENT_NSID, LISTENER_NSID, buildListenerRecord } from "./records.js";
 import { getStorage, randomId, storageGet, storageSet } from "./util.js";
 
-const DID_KEY = "cm:demo-did";
-const S32 = "234567abcdefghijklmnopqrstuvwxyz";
+const DEMO_DID_STORAGE_KEY = "cm:demo-did";
+const BASE32_SORTABLE_ALPHABET = "234567abcdefghijklmnopqrstuvwxyz";
 
-let lastTidUs = 0n;
+let lastTimestampMicros = 0n;
 const clockId = BigInt(Math.floor(Math.random() * 1024));
 
 /**
@@ -18,79 +18,96 @@ const clockId = BigInt(Math.floor(Math.random() * 1024));
  * @param {number} [nowMs]
  * @returns {string}
  */
-export function generateTid(nowMs = Date.now()) {
-  let us = BigInt(Math.floor(nowMs)) * 1000n;
-  if (us <= lastTidUs) us = lastTidUs + 1n;
-  lastTidUs = us;
-  let n = ((us & ((1n << 53n) - 1n)) << 10n) | clockId;
-  let out = "";
-  for (let i = 0; i < 13; i++) {
-    out = S32[Number(n & 31n)] + out;
-    n >>= 5n;
+export function generateTimestampRecordKey(nowMs = Date.now()) {
+  let timestampMicros = BigInt(Math.floor(nowMs)) * 1000n;
+  if (timestampMicros <= lastTimestampMicros)
+    timestampMicros = lastTimestampMicros + 1n;
+  lastTimestampMicros = timestampMicros;
+  let remainingBits = ((timestampMicros & ((1n << 53n) - 1n)) << 10n) | clockId;
+  let encodedRecordKey = "";
+  for (let characterIndex = 0; characterIndex < 13; characterIndex++) {
+    encodedRecordKey =
+      BASE32_SORTABLE_ALPHABET[Number(remainingBits & 31n)] + encodedRecordKey;
+    remainingBits >>= 5n;
   }
-  return out;
+  return encodedRecordKey;
 }
 
 /**
  * Build a Jetstream-shaped commit (see CONTRACTS.md).
  * @param {{did: string, operation: 'create'|'update'|'delete', collection: string,
- *   rkey: string, record?: object, nowMs?: number}} p
+ *   rkey: string, record?: object, nowMs?: number}} commitFields field names
+ *   follow Jetstream: `did` is the repo owner's DID, `rkey` the record key
  * @returns {object}
  */
 export function buildCommit({
-  did,
+  did: repoDid,
   operation,
   collection,
-  rkey,
+  rkey: recordKey,
   record,
   nowMs = Date.now(),
 }) {
-  const commit = { operation, collection, rkey };
+  const commit = { operation, collection, rkey: recordKey };
   if (operation !== "delete") {
     commit.cid = `bafydev${randomId(24)}`;
     commit.record = record;
   }
-  return { did, time_us: Math.floor(nowMs) * 1000, kind: "commit", commit };
+  return {
+    did: repoDid,
+    time_us: Math.floor(nowMs) * 1000,
+    kind: "commit",
+    commit,
+  };
 }
 
 /**
- * @param {{api: {postDevRecord(c: object): Promise<any>}, storage?: Storage|null}} opts
+ * @param {{api: {postDevRecord(commit: object): Promise<any>}, storage?: Storage|null}} options
  */
 export function createDevWriter({ api, storage = getStorage("localStorage") }) {
-  let did = storageGet(storage, DID_KEY);
-  if (!did) {
-    did = `did:plc:demo-${randomId(12)}`;
-    storageSet(storage, DID_KEY, did);
+  let demoDid = storageGet(storage, DEMO_DID_STORAGE_KEY);
+  if (!demoDid) {
+    demoDid = `did:plc:demo-${randomId(12)}`;
+    storageSet(storage, DEMO_DID_STORAGE_KEY, demoDid);
   }
 
-  async function commit(operation, collection, rkey, record) {
-    const c = buildCommit({ did, operation, collection, rkey, record });
-    await api.postDevRecord(c);
-    return { uri: `at://${did}/${collection}/${rkey}`, cid: c.commit.cid };
+  async function commit(operation, collection, recordKey, record) {
+    const jetstreamCommit = buildCommit({
+      did: demoDid,
+      operation,
+      collection,
+      rkey: recordKey,
+      record,
+    });
+    await api.postDevRecord(jetstreamCommit);
+    return {
+      uri: `at://${demoDid}/${collection}/${recordKey}`,
+      cid: jetstreamCommit.commit.cid,
+    };
   }
 
   return {
     kind: "dev",
-    did,
+    did: demoDid,
     handle: "demo",
     loggedIn: false,
     /** @param {object} record @returns {Promise<{uri: string, cid: string}>} */
     createEvent: (record) =>
-      commit("create", EVENT_NSID, generateTid(), {
+      commit("create", EVENT_NSID, generateTimestampRecordKey(), {
         ...record,
         $type: EVENT_NSID,
       }),
-    /** @param {string} rkey @param {object} record */
-    updateEvent: (rkey, record) =>
-      commit("update", EVENT_NSID, rkey, { ...record, $type: EVENT_NSID }),
-    /** @param {string} rkey */
-    deleteEvent: (rkey) => commit("delete", EVENT_NSID, rkey),
+    /** @param {string} recordKey @param {object} record */
+    updateEvent: (recordKey, record) =>
+      commit("update", EVENT_NSID, recordKey, { ...record, $type: EVENT_NSID }),
+    /** @param {string} recordKey */
+    deleteEvent: (recordKey) => commit("delete", EVENT_NSID, recordKey),
     /** @param {string} eventUri @param {string} hashtag */
     createListener: (eventUri, hashtag) =>
       commit(
         "create",
         LISTENER_NSID,
-        generateTid(),
+        generateTimestampRecordKey(),
         buildListenerRecord(eventUri, hashtag),
       ),
   };
