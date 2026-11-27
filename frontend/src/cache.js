@@ -2,7 +2,7 @@
  * Small localStorage-backed response cache. Every storage access is guarded.
  * @module cache
  */
-import { getStorage, storageGet, storageSet } from "./util.js";
+import { getStorage, storageGet, storageSet } from './util.js';
 
 /**
  * @typedef {{value: any, savedAt: number}} CacheEntry
@@ -15,11 +15,7 @@ import { getStorage, storageGet, storageSet } from "./util.js";
  * @param {{storage?: Storage|null, prefix?: string, now?: () => number}} [opts]
  * @returns {Cache}
  */
-export function createCache({
-  storage = getStorage("localStorage"),
-  prefix = "cm:cache:",
-  now = Date.now,
-} = {}) {
+export function createCache({ storage = getStorage('localStorage'), prefix = 'cm:cache:', now = Date.now } = {}) {
   const keyOf = (k) => prefix + k;
 
   function get(key) {
@@ -27,7 +23,7 @@ export function createCache({
     if (!raw) return null;
     try {
       const entry = JSON.parse(raw);
-      return entry && "value" in entry ? entry : null;
+      return entry && 'value' in entry ? entry : null;
     } catch {
       return null;
     }

@@ -8,13 +8,7 @@
  */
 
 /** @type {FilterState} */
-export const EMPTY_FILTERS = Object.freeze({
-  tags: [],
-  group: "",
-  q: "",
-  nearMe: false,
-  sort: "soonest",
-});
+export const EMPTY_FILTERS = Object.freeze({ tags: [], group: '', q: '', nearMe: false, sort: 'soonest' });
 
 /**
  * Build GET /api/events params from filter state. `nearMe` is never sent (privacy).
@@ -22,21 +16,15 @@ export const EMPTY_FILTERS = Object.freeze({
  * @param {{cursor?: string|null, limit?: number}} [page]
  * @returns {Record<string, any>}
  */
-export function buildEventQuery(
-  filters,
-  { cursor = null, limit = 20, bbox = null } = {},
-) {
+export function buildEventQuery(filters, { cursor = null, limit = 20, bbox = null } = {}) {
   const params = { limit };
   if (filters.tags?.length) params.tag = [...filters.tags];
   if (filters.group) params.group = filters.group;
-  const q = (filters.q || "").trim();
+  const q = (filters.q || '').trim();
   if (q) params.q = q;
-  if (filters.sort && filters.sort !== "soonest") params.sort = filters.sort;
+  if (filters.sort && filters.sort !== 'soonest') params.sort = filters.sort;
   if (bbox) {
-    params.bbox =
-      typeof bbox === "string"
-        ? bbox
-        : `${bbox.west},${bbox.south},${bbox.east},${bbox.north}`;
+    params.bbox = typeof bbox === 'string' ? bbox : `${bbox.west},${bbox.south},${bbox.east},${bbox.north}`;
   }
   if (cursor) params.cursor = cursor;
   return params;
@@ -59,14 +47,7 @@ export function toggleTag(tags, tag) {
  */
 export function coordsOf(event) {
   const loc = event?.location;
-  if (
-    !loc ||
-    loc.lat == null ||
-    loc.lng == null ||
-    loc.lat === "" ||
-    loc.lng === ""
-  )
-    return null;
+  if (!loc || loc.lat == null || loc.lng == null || loc.lat === '' || loc.lng === '') return null;
   const lat = Number(loc.lat);
   const lng = Number(loc.lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
@@ -85,9 +66,7 @@ export function haversineKm(a, b) {
   const rad = (d) => (d * Math.PI) / 180;
   const dLat = rad(b.lat - a.lat);
   const dLng = rad(b.lng - a.lng);
-  const s =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
 }
 
@@ -118,7 +97,7 @@ export function sortByDistance(events, origin) {
  * @returns {string}
  */
 export function dayKey(d) {
-  const p = (n) => String(n).padStart(2, "0");
+  const p = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
@@ -132,15 +111,10 @@ export function dayKey(d) {
 export function dayLabel(day, now, locale) {
   const startOf = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const diff = Math.round((startOf(day) - startOf(now)) / 86400000);
-  if (diff <= 0) return "Today";
-  if (diff === 1) return "Tomorrow";
-  if (diff < 7)
-    return new Intl.DateTimeFormat(locale, { weekday: "long" }).format(day);
-  return new Intl.DateTimeFormat(locale, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  }).format(day);
+  if (diff <= 0) return 'Today';
+  if (diff === 1) return 'Tomorrow';
+  if (diff < 7) return new Intl.DateTimeFormat(locale, { weekday: 'long' }).format(day);
+  return new Intl.DateTimeFormat(locale, { weekday: 'short', month: 'short', day: 'numeric' }).format(day);
 }
 
 /**
@@ -156,13 +130,10 @@ export function groupByDay(events, { now = new Date(), locale } = {}) {
     const start = new Date(ev.startsAt);
     const day = start < now ? now : start;
     const key = dayKey(day);
-    if (!groups.has(key))
-      groups.set(key, { key, label: dayLabel(day, now, locale), events: [] });
+    if (!groups.has(key)) groups.set(key, { key, label: dayLabel(day, now, locale), events: [] });
     groups.get(key).events.push(ev);
   }
-  return [...groups.values()].sort((a, b) =>
-    a.key < b.key ? -1 : a.key > b.key ? 1 : 0,
-  );
+  return [...groups.values()].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 }
 
 /**

@@ -23,7 +23,7 @@ export function createStore(initial) {
     get: () => state,
     set(patch) {
       const prev = state;
-      const delta = typeof patch === "function" ? patch(prev) : patch;
+      const delta = typeof patch === 'function' ? patch(prev) : patch;
       state = { ...prev, ...delta };
       for (const fn of [...listeners]) fn(state, prev);
     },

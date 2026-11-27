@@ -26,12 +26,11 @@ export function debounce(fn, ms) {
  * @returns {string}
  */
 export function randomId(len = 16) {
-  const alphabet = "abcdefghijklmnopqrstuvwxyz234567";
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
   const bytes = new Uint8Array(len);
-  if (globalThis.crypto?.getRandomValues)
-    globalThis.crypto.getRandomValues(bytes);
+  if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(bytes);
   else for (let i = 0; i < len; i++) bytes[i] = Math.floor(Math.random() * 256);
-  return Array.from(bytes, (b) => alphabet[b % 32]).join("");
+  return Array.from(bytes, (b) => alphabet[b % 32]).join('');
 }
 
 /**

@@ -1,8 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
-import { createStore } from "../src/store.js";
+import { describe, expect, it, vi } from 'vitest';
+import { createStore } from '../src/store.js';
 
-describe("store", () => {
-  it("merges patches and notifies with prev state", () => {
+describe('store', () => {
+  it('merges patches and notifies with prev state', () => {
     const s = createStore({ a: 1, b: 2 });
     const fn = vi.fn();
     s.subscribe(fn);
@@ -11,7 +11,7 @@ describe("store", () => {
     expect(fn).toHaveBeenCalledWith({ a: 3, b: 2 }, { a: 1, b: 2 });
   });
 
-  it("supports functional updates and unsubscribe", () => {
+  it('supports functional updates and unsubscribe', () => {
     const s = createStore({ n: 1 });
     const fn = vi.fn();
     const off = s.subscribe(fn);
@@ -22,7 +22,7 @@ describe("store", () => {
     expect(s.get().n).toBe(10);
   });
 
-  it("does not mutate the initial object", () => {
+  it('does not mutate the initial object', () => {
     const init = { n: 1 };
     createStore(init).set({ n: 2 });
     expect(init.n).toBe(1);
