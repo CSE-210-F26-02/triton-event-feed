@@ -9,25 +9,27 @@ import { AuthProvider } from "../auth";
 const auth = new AuthProvider();
 
 function checkSession(){
-    const validSession = auth.isSessionValid()
+    const validSession = auth.isSessionValid();
 
     console.log(`Session valid: ${validSession}`);
     if (validSession) {
-        console.log(`Session: ${auth.session.sub}`)
+        console.log(`Session: ${auth.agent.did}`);
     } 
 }
 
-await auth.preInitClient();
 const initOutcome = await auth.initClient();
 if (initOutcome) {
     console.log("Successful login");
     checkSession();
-} else {
-    
 }
 
-document.getElementById("bsky-oauth-login").onclick = (event) => {
-    auth.login(document.getElementById("user-handle").value);
+document.getElementById("bsky-oauth-login").onclick = async (event) => {
+    await auth.login(document.getElementById("user-handle").value);
+    checkSession();
+};
+
+document.getElementById("password-login").onclick = async (event) => {
+    await auth.login(document.getElementById("user-handle").value, document.getElementById("app-pw").value);
     checkSession();
 };
 

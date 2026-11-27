@@ -1,8 +1,9 @@
 // Useful Link: https://github.com/bluesky-social/cookbook/tree/main/vanillajs-oauth-web-app#readme
 // Note privacy concerns with using BSky's handle resolver
+// Ended up using https://github.com/bluesky-social/atproto/tree/main/packages/api for the hybrid password/oauth implementation
 
-import { BrowserOAuthClient } from '@atproto/oauth-client-browser'
-import { Agent } from '@atproto/api'
+import { BrowserOAuthClient } from '@atproto/oauth-client-browser';
+import { Agent, CredentialSession } from '@atproto/api';
 
 // TODO: Warn users abot privacy policy, or deploy our own handler
 const HandleResolver = 'https://bsky.social';
@@ -10,20 +11,26 @@ const HandleResolver = 'https://bsky.social';
 class AuthProvider
 {
     /**
-     * A URL pointing to the client metadata document (oauth-client-metadata.json). Currently unused in local testing setup.
+     * A URL pointing to the client metadata document (oauth-client-metadata.json).
      */
     #clientID;
 
+    // OAuth-specific data
+
     /**
-     * An OAuthClient object representing the provider's current interface with the OAuth api.
+     * An OAuthClient object representing the provider's current interface with the OAuth API.
      */
     #oAuthClient;
 
     /**
-     * An OAuthSession object representing the user's current authenticated session. May be null if session is invalid.
+     * TODO: Uncertain if this should be kept, may remove later on.
+     * An OAuthSession (from @atproto/oauth-client) object representing the user's current authenticated session.
+     * May be null if session is invalid.
      */
     #oAuthSession;
-    
+
+    // Below are products of authentication, both password and OAuth will create these
+
     /**
      * An Agent object (from the atproto API) for interacting with the user's PDS. May be null if session is invalid.
      */
@@ -34,9 +41,10 @@ class AuthProvider
     }
 
     /**
-     * Constructs the oAuth client used by this provider. Should be called exactly once. 
+     * Initializes the OAuth Client. Should be called exactly once before login if OAuth-based authentication is desired. (Not needed for password-based)
+     * @returns True if the initialization successfully recovered an existing session, false otherwise (should call login to get a session if false)
      */
-    async preInitClient() {
+    async initClient() {
         // Apparently possible to avoid trip to fetch metadata document, see top link
         this.#oAuthClient = await BrowserOAuthClient.load({
             clientId: this.#clientID,
@@ -50,17 +58,11 @@ class AuthProvider
             const { sub, cause } = event.detail;
             console.error(`Session for ${sub} is no longer available (cause: ${cause})`);
         });*/
-    }
 
-    /**
-     * Initializes the oAuth Client after it has been constructed in preInit. Should be called exactly once.
-     * @returns True if the initialization successfully recovered an existing session, false otherwise (should call login to get a session if false)
-     */
-    async initClient() {
-        const result = await this.#oAuthClient.init();
+        const oAuthResult = await this.#oAuthClient.init();
 
-        if (result) {
-            const {session, state } = result;
+        if (oAuthResult) {
+            const {session, state } = oAuthResult;
             // Docs seem to indicate session will always exist
             this.#oAuthSession = session;
             this.#agent = new Agent(session);
@@ -78,9 +80,24 @@ class AuthProvider
     }
 
     /**
-     * Logs the user in using a fully specified handle. If not in a local test environment, attempts to login silently.
+     * Unified function to log the user in, using either password or OAuth. 
+     * If not in a local test environment, OAuth attempts to login silently. (TODO: test)
+     * If a password is provided, attempts to use password authentication.
      */
-    async login(handle) {
+    async login(handle, password=null) {
+        if (password) {
+            await this.loginPassword(handle, password);
+        } else {
+            await this.loginOAuth(handle);
+        }
+    }
+
+    /**
+     * Logs the user in, using OAuth. 
+     * If not in a local test environment, OAuth attempts to login silently. (TODO: test)
+     * Results in a redirect if successful, causing a page refresh
+     */
+    async loginOAuth(handle) {
         try {
             // Can only perform a silent sign on for non-local clients
             const signInPrompt = isLocal() ? 'login' : 'none';
@@ -99,6 +116,23 @@ class AuthProvider
         }
     }
 
+    /**
+     * Logs the user in, using a password. 
+     * Initializes the agent field of the AuthProvider if successful.
+     */
+    async loginPassword(handle, password) {
+        try {
+            const session = new CredentialSession(new URL('https://bsky.social'));
+            await session.login({
+                identifier: handle,
+                password: password,
+            });
+            this.#agent = new Agent(session);
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
     invalidateSession() {
         // Handles session invalidation, may want to add a redirect at some point
         this.#oAuthSession = null;
@@ -109,14 +143,9 @@ class AuthProvider
         return this.#oAuthClient !== null && this.#oAuthSession !== null && this.#agent !== null;
     }
 
-    get oAuthClient() {
-        return this.#oAuthClient;
-    }
-
-    get session() {
-        return this.#oAuthSession;
-    }
-
+    /**
+     * Use this to manipulate user PDS data.
+     */
     get agent() {
         return this.#agent;
     }
@@ -128,12 +157,13 @@ class AuthProvider
  * @returns A URL (string) representing the Client ID for an authorization request.
  */
 function buildClientID() {
+
     if (isLocal()) {
         return `http://localhost?${new URLSearchParams({
             // Specifies all permissions we may need from this authorization.
             scope: "atproto repo:app.bsky.feed.post?action=create",
             // Redirect URI for local developement must have a 127.0.0.1 hostname, per specs
-            redirect_uri: Object.assign(new URL(window.location.origin), { hostname: '127.0.0.1' }).href,
+            redirect_uri: Object.assign(new URL(window.location.origin), { hostname: '127.0.0.1', pathname: window.location.pathname }).href,
         })}`;
     }
 
