@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import hashlib
 import json
 from typing import Annotated, Any
@@ -6,16 +6,22 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 
-from app.deps import get_store
 from app.models import BoundingBox, EventQuery, SortOrder
 from app.store.base import EventStore
 from app.views import event_view, update_view
+from app.config import Settings
+from app.deps import get_app_settings, get_store
 
 router = APIRouter(prefix="/api")
 
 Store = Annotated[EventStore, Depends(get_store)]
 CACHE_CONTROL = "no-cache"
 
+
+SettingsDep = Annotated[Settings, Depends(get_app_settings)]
+
+def _visible_cutoff(now: datetime, settings: Settings) -> datetime:
+    return now - timedelta(seconds=settings.expiry_grace_s)
 
 def _merge_tags(tag: list[str], tags: list[str]) -> list[str]:
     merged = list(tag)
@@ -52,7 +58,8 @@ def _cached_json(request: Request, payload: Any) -> Response:
 def list_events(
     request: Request,
     store: Store,
-    tag: Annotated[list[str], Query(max_length=32)] = [],  # noqa: B006 (FastAPI copies it)
+    settings: SettingsDep,
+    tag: Annotated[list[str], Query(max_length=32)] = [],  # noqa: B006
     tags: Annotated[list[str], Query(max_length=400)] = [],  # noqa: B006
     group: Annotated[str | None, Query(max_length=100)] = None,
     q: Annotated[str | None, Query(max_length=200)] = None,
@@ -76,7 +83,7 @@ def list_events(
         group=group or None,
         text=q or None,
         starts_before=before,
-        ends_after=after,
+        ends_after=after or _visible_cutoff(now, settings),
         bbox=parsed_bbox,
         sort=sort,
         limit=limit,
@@ -102,10 +109,12 @@ def get_event(uri: str, request: Request, store: Store) -> Response:
 
 
 @router.get("/tags")
-def list_tags(request: Request, store: Store) -> Response:
-    return _cached_json(request, [c.model_dump() for c in store.list_tags(datetime.now(UTC))])
+def list_tags(request: Request, store: Store, settings: SettingsDep) -> Response:
+    cutoff = _visible_cutoff(datetime.now(UTC), settings)
+    return _cached_json(request, [c.model_dump() for c in store.list_tags(cutoff)])
 
 
 @router.get("/groups")
-def list_groups(request: Request, store: Store) -> Response:
-    return _cached_json(request, [c.model_dump() for c in store.list_groups(datetime.now(UTC))])
+def list_groups(request: Request, store: Store, settings: SettingsDep) -> Response:
+    cutoff = _visible_cutoff(datetime.now(UTC), settings)
+    return _cached_json(request, [c.model_dump() for c in store.list_groups(cutoff)])

@@ -4,7 +4,8 @@
  */
 import { closeDialog, h, openDialog, safeHttpUrl } from '../dom.js';
 import { isUpdated } from '../filters.js';
-import { formatDateTime, formatTimeWindow, osmUrl, statusLabel } from '../format.js';
+import { formatDateTime, formatTimeWindow, osmUrl, statusBadges } from '../format.js';
+
 
 /**
  * Render the dialog body for an event.
@@ -16,15 +17,16 @@ import { formatDateTime, formatTimeWindow, osmUrl, statusLabel } from '../format
 export function renderDetail(ev, opts = {}) {
   const href = osmUrl(ev);
   const source = safeHttpUrl(ev.sourceUrl);
-  const status = statusLabel(ev.status);
+  const badges = statusBadges(ev.status);
   const updates = [...(ev.updates || [])].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   return [
     h('h2', { id: 'detail-title' }, ev.name),
     h('div', { class: 'card__badges' },
-      status && h('span', { class: `badge badge--${ev.status}` }, status),
+      ...badges.map((b) => h('span', { class: `badge badge--${b.mod}` }, b.label)),
       isUpdated(ev) && h('span', { class: 'badge badge--updated' }, 'Updated'),
       opts.stale && h('span', { class: 'badge' }, 'Saved copy'),
     ),
+    ev.status === 'ended' && h('p', { class: 'notice notice--ended', role: 'status' }, 'This event has ended.'),
     h('p', null, h('time', { datetime: ev.startsAt }, formatTimeWindow(ev.startsAt, ev.endsAt, opts))),
     h('p', null,
       href ? h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, ev.location?.name) : ev.location?.name,
@@ -56,19 +58,24 @@ export function renderDetail(ev, opts = {}) {
  *   canEdit?: (ev: object) => boolean, onEdit?: (ev: object) => void, onDelete?: (ev: object) => void}} deps
  * @returns {{open(uri: string): Promise<void>, close(): void, element: HTMLDialogElement}}
  */
-export function createDetailView({ api, canEdit = () => false, onEdit, onDelete }) {
+export function createDetailView({ api, canEdit = () => false, onEdit, onDelete, onOpenUri, onClose }) {
   const body = h('div', { class: 'dialog__body' });
+  const close = () => {
+    closeDialog(dialog);
+    onClose?.();
+  };
   const dialog = h('dialog', { class: 'dialog', 'aria-labelledby': 'detail-title' },
-    h('button', { type: 'button', class: 'btn dialog__close', 'aria-label': 'Close', onclick: () => closeDialog(dialog) }, '×'),
+    h('button', { type: 'button', class: 'btn dialog__close', 'aria-label': 'Close', onclick: close }, '×'),
     body,
   );
+  dialog.addEventListener('close', () => onClose?.());
 
   async function open(uri) {
+    onOpenUri?.(uri);
     body.replaceChildren(h('p', { id: 'detail-title', role: 'status' }, 'Loading…'));
     openDialog(dialog);
     try {
       const { data, stale } = await api.getEvent(uri);
-      const close = () => closeDialog(dialog);
       body.replaceChildren(...renderDetail(data, {
         stale,
         canEdit: canEdit(data),
@@ -81,5 +88,5 @@ export function createDetailView({ api, canEdit = () => false, onEdit, onDelete 
     }
   }
 
-  return { open, close: () => closeDialog(dialog), element: dialog };
+  return { open, close, element: dialog };
 }

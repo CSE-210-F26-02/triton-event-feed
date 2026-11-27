@@ -5,7 +5,7 @@
  */
 import { h } from '../dom.js';
 import { groupByDay, isUpdated } from '../filters.js';
-import { formatDistance, formatTimeWindow, osmUrl, statusLabel } from '../format.js';
+import { formatDistance, formatTimeWindow, osmUrl, statusLabel, statusBadges } from '../format.js';
 
 /**
  * @typedef {{onOpen?: (uri: string) => void, onTagClick?: (tag: string) => void,
@@ -22,14 +22,14 @@ import { formatDistance, formatTimeWindow, osmUrl, statusLabel } from '../format
 export function renderCard(ev, opts = {}) {
   const { onOpen, onTagClick, onToggleSubscribe, activeTags = [], subscribed = new Set() } = opts;
   const titleId = `ev-${hashId(ev.uri)}`;
-  const status = statusLabel(ev.status);
+  const badges = statusBadges(ev.status);
   const href = osmUrl(ev);
   const isSub = subscribed.has(ev.uri);
   const distance = formatDistance(ev.distanceKm);
 
   return h('article', { class: 'card', 'aria-labelledby': titleId, dataset: { uri: ev.uri } },
     h('div', { class: 'card__badges' },
-      status && h('span', { class: `badge badge--${ev.status}` }, status),
+      ...badges.map((b) => h('span', { class: `badge badge--${b.mod}` }, b.label)),
       isUpdated(ev) && h('span', { class: 'badge badge--updated' }, 'Updated'),
     ),
     h('h3', { class: 'card__title', id: titleId },

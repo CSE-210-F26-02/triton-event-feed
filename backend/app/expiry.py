@@ -33,21 +33,37 @@ def _utc(dt: datetime) -> datetime:
 
 
 async def sweep_once(
-    store: EventStore, notifier: Notifier, now: datetime, grace_s: int
+    store: EventStore,
+    notifier: Notifier,
+    now: datetime,
+    grace_s: int,
+    purge_days: float = 0.0,
 ) -> list[str]:
-    cutoff = _utc(now) - timedelta(seconds=grace_s)
-    for ev in _expired_events(store, cutoff):
-        await notifier.publish(ev.uri, "expired", f"{ev.record.name} has ended")
-    removed = store.delete_expired(cutoff)
+    expiry_cutoff = _utc(now) - timedelta(seconds=grace_s)
+    for ev in _expired_events(store, expiry_cutoff):
+        subs = store.subscribers_of(ev.uri)
+        if subs:
+            await notifier.publish(ev.uri, "expired", f"{ev.record.name} has ended")
+            for sub in subs:
+                store.unsubscribe(sub, ev.uri)
+
+    purge_cutoff = expiry_cutoff - timedelta(days=purge_days)
+    removed = store.delete_expired(purge_cutoff)
     if removed:
-        log.info("expired %d event(s)", len(removed))
+        log.info("purged %d expired event(s)", len(removed))
     return removed
 
 
 async def run_expiry_loop(store: EventStore, notifier: Notifier, settings: Settings) -> None:
     while True:
         try:
-            await sweep_once(store, notifier, datetime.now(UTC), settings.expiry_grace_s)
+            await sweep_once(
+                store,
+                notifier,
+                datetime.now(UTC),
+                settings.expiry_grace_s,
+                settings.expiry_purge_days,
+            )
         except Exception:
             log.exception("expiry sweep failed")
         await asyncio.sleep(settings.expiry_interval_s)

@@ -51,12 +51,12 @@ export function osmUrl(event) {
 }
 
 /**
- * Status badge text for EventView.status, or null for "upcoming".
+ * Primary status badge text for EventView.status, or null for "upcoming".
  * @param {string} status
  * @returns {string|null}
  */
 export function statusLabel(status) {
-  return { live: 'Live', ending_soon: 'Ending soon' }[status] ?? null;
+  return { live: 'Happening now', ending_soon: 'Ending soon', ended: 'Ended' }[status] ?? null;
 }
 
 /**
@@ -68,3 +68,21 @@ export function formatDistance(km) {
   if (km == null) return null;
   return km < 1 ? `${Math.round(km * 1000)} m away` : `${km.toFixed(1)} km away`;
 }
+
+/**
+ * Status badge descriptors for EventView.status.
+ * @param {string} status
+ * @returns {{label: string, mod: string}[]}
+ */
+export function statusBadges(status) {
+  if (status === 'live') return [{ label: 'Happening now', mod: 'live' }];
+  if (status === 'ending_soon') {
+    return [
+      { label: 'Happening now', mod: 'live' },
+      { label: 'Ending soon', mod: 'ending_soon' },
+    ];
+  }
+  if (status === 'ended') return [{ label: 'Ended', mod: 'ended' }];
+  return [];
+}
+

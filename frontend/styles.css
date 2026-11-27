@@ -254,3 +254,6 @@ input, select, textarea {
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }
+
+.badge--ended { color: var(--muted); }
+.notice--ended { border-left-color: var(--muted); }

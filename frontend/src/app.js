@@ -20,6 +20,15 @@ import { createMapView } from './views/mapView.js';
 
 const $ = (sel) => document.querySelector(sel);
 
+function setEventUrl(uri) {
+    try {
+      const u = new URL(window.location.href);
+      if (uri) u.searchParams.set('event', uri);
+      else u.searchParams.delete('event');
+      history.replaceState(null, '', u.pathname + u.search + u.hash);
+    } catch { /* non-http test environment */ }
+  }
+
 /**
  * Start the app. API base comes from <meta name="cm-api-base"> (default: same origin).
  * @param {{baseUrl?: string}} [opts]
@@ -94,7 +103,7 @@ export async function start({ baseUrl = $('meta[name="cm-api-base"]')?.content ?
     onChange: (subscribed) => store.set({ subscribed }),
     onNotification: (n) => applyNotification(n),
   });
-  const detail = createDetailView({ api, canEdit, onEdit: (ev) => compose.open(ev), onDelete: (ev) => compose.remove(ev) });
+  const detail = createDetailView({api, canEdit, onEdit: (ev) => compose.open(ev),onDelete: (ev) => compose.remove(ev),onOpenUri: (uri) => setEventUrl(uri),onClose: () => setEventUrl(null)});
   const compose = createComposeView({
     getWriter: writer, geo, toast,
     onSaved: () => { toast('Event saved. It can take a few seconds to appear.'); setTimeout(() => { loadEvents(); loadFacets(); }, 1500); },
@@ -213,4 +222,6 @@ function registerServiceWorker() {
 
 if (typeof window !== 'undefined' && !globalThis.__CM_NO_AUTOSTART__ && document.querySelector('#list')) {
   start();
+  const directUri = new URLSearchParams(window.location.search).get('event');
+  if (directUri) detail.open(directUri);
 }
