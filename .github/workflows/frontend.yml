@@ -20,7 +20,7 @@ jobs:
               run: npm ci --ignore-scripts
               working-directory: ./frontend
             - name: Install ESLint and Prettier
-              run: npm install eslint prettier --save-dev
+              run: npm install eslint prettier --save-dev --save-exact
               working-directory: ./frontend
             - name: Run style linter checks
               run: npm run lint
