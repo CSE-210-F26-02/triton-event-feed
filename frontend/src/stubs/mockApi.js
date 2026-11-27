@@ -5,9 +5,18 @@
  * the real backend serves /api/*.
  * @module stubs/mockApi
  */
+import { describeGroup } from "../lexicon/eventView.js";
+import { EVENT_NSID } from "../lexicon/validateEvent.js";
 import { storageGet, storageSet, getStorage } from "../util.js";
 
-const EVENT_NSID = "app.communitymap.event";
+/** Collection the mock groups live in (the group lexicon itself is still #17). */
+const GROUP_NSID = "app.communitymap.group";
+/**
+ * A well-formed CID for every mock group strongRef (the lexicon validates the format);
+ * the same value as fixtures/event/valid/full.json. The mock never resolves it.
+ */
+const MOCK_GROUP_CID =
+  "bafyreihooyosut5ztb3xty23uwoyij5ovnqr5qldanntxmah33quatfwoy";
 const DEMO_DID_KEY = "cm:demo-did"; // same key devWriter uses, so you "own" one event
 
 /**
@@ -33,7 +42,19 @@ function demoDid() {
 }
 
 /**
- * Build one mock EventView.
+ * Build a com.atproto.repo.strongRef to a mock group record, matching the lexicon's
+ * `group` field.
+ * @param {string} did DID of the group's owner
+ * @param {string} rkey record key of the group (shown as the placeholder label, see #17)
+ * @returns {{uri: string, cid: string}}
+ */
+const mockGroupRef = (did, rkey) => ({
+  uri: `at://${did}/${GROUP_NSID}/${rkey}`,
+  cid: MOCK_GROUP_CID,
+});
+
+/**
+ * Build one mock EventView (lexicon record fields + AppView metadata).
  * @param {object} fields overrides; must include `did` and `rkey`
  * @returns {object}
  */
@@ -44,6 +65,7 @@ function mockEvent({ did, rkey, ...fields }) {
     authorDid: did,
     source: "atproto",
     sourceUrl: null,
+    createdAt: hoursFromNow(-48),
     indexedAt: hoursFromNow(-48),
     updatedAt: hoursFromNow(-48),
     status: "upcoming",
@@ -55,7 +77,8 @@ function mockEvent({ did, rkey, ...fields }) {
 
 /**
  * The mock event set: one you host (edited, with announcements), one by someone else,
- * one with no map pin, and one that has already ended.
+ * one whose record breaks the lexicon (no lat/lng, to preview the best-effort warning),
+ * and one that has already ended.
  * @returns {object[]}
  */
 function mockEvents() {
@@ -76,7 +99,7 @@ function mockEvents() {
         lng: "-117.2362",
       },
       tags: ["food", "free", "social"],
-      group: "Triton Eats",
+      group: mockGroupRef("did:plc:mockeats0000000", "triton-eats"),
       sourceUrl: "https://example.com/taco-tuesday",
       updatedAt: hoursFromNow(-1), // edited → shows "Updated <time>"
       updates: [
@@ -102,7 +125,7 @@ function mockEvents() {
         lng: "-117.2335",
       },
       tags: ["tech", "hackathon"],
-      group: "ACM at UCSD",
+      group: mockGroupRef("did:plc:mockacm0000000", "acm-at-ucsd"),
     }),
     mockEvent({
       did: "did:plc:mockclub0000000",
@@ -110,7 +133,8 @@ function mockEvents() {
       authorHandle: "sunsetclub.bsky.social",
       name: "Sunset Walk (meet-up spot TBD)",
       description:
-        "No map pin on this one, to preview the no-coordinates state.",
+        "Its record has no lat/lng, which the lexicon requires, to preview the " +
+        "best-effort “some details may be missing” warning and the no-pin map state.",
       startsAt: hoursFromNow(50),
       endsAt: hoursFromNow(52),
       location: { name: "Somewhere near Scripps Pier" },
@@ -131,7 +155,7 @@ function mockEvents() {
         lng: "-117.2400",
       },
       tags: ["fitness"],
-      group: "Rec Club",
+      group: mockGroupRef("did:plc:mockclub0000000", "rec-club"),
     }),
   ];
 }
@@ -181,7 +205,11 @@ export function createMockFetch() {
     },
     "/api/tags": () => respond(facetCounts(events.flatMap((ev) => ev.tags))),
     "/api/groups": () =>
-      respond(facetCounts(events.map((ev) => ev.group).filter(Boolean))),
+      respond(
+        facetCounts(
+          events.map((ev) => describeGroup(ev.group)?.label).filter(Boolean),
+        ),
+      ),
     "/api/subscriptions": (params, init) => {
       if (!init?.method || init.method === "GET")
         return respond([...subscribed]);

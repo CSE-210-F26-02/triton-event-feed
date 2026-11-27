@@ -1,8 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createListView, renderCard } from "../src/views/listView.js";
-import { sampleEvent } from "./helpers.js";
+import fullFixture from "../../fixtures/event/valid/full.json";
+import { lexiconEventView, sampleEvent } from "./helpers.js";
 
 describe("renderCard", () => {
+  it("labels a lexicon strongRef group with its record key and keeps its URI", () => {
+    const card = renderCard(lexiconEventView(fullFixture.record));
+    const group = card.querySelector(".card__group");
+    expect(group.textContent).toBe("3lbxq7k2mzs2a");
+    expect(group.dataset.groupUri).toBe(fullFixture.record.group.uri);
+    expect(card.textContent).not.toContain("[object Object]");
+  });
+
+  it("omits the group line when the group is missing or unusable", () => {
+    for (const group of [undefined, "", { cid: "bafy" }, 12]) {
+      expect(
+        renderCard(sampleEvent({ group })).querySelector(".card__group"),
+      ).toBeNull();
+    }
+  });
+
   it("renders name, time, OSM pin link, group, tags, subscribe toggle", () => {
     const card = renderCard(sampleEvent(), {
       timeZone: "America/Los_Angeles",

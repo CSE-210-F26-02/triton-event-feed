@@ -1,3 +1,6 @@
+// @vitest-environment node
+// (Reads fixtures from disk via import.meta.url, which must be a file: URL. The default
+// jsdom environment used by the view tests rewrites it, so this suite opts back into node.)
 /**
  * Runs every shared fixture in fixtures/event/ (repo root) through
  * validateEvent. The backend's Python tests run the same files, so both

@@ -5,6 +5,7 @@
  */
 import { h } from "../dom.js";
 import { groupByDay, isUpdated } from "../filters.js";
+import { describeGroup } from "../lexicon/eventView.js";
 import {
   formatDistance,
   formatTimeWindow,
@@ -17,6 +18,22 @@ import {
  *   onToggleSubscribe?: (uri: string) => void, activeTags?: string[],
  *   subscribed?: Set<string>, locale?: string, timeZone?: string}} CardOpts
  */
+
+/**
+ * Group line on a card. Lexicon strongRef groups keep their record URI on the element
+ * (data-group-uri) so #17 can replace the placeholder label with the group's name.
+ * @param {import('../lexicon/eventView.js').DisplayGroup} group
+ * @returns {HTMLElement}
+ */
+const renderCardGroup = (group) =>
+  h(
+    "p",
+    {
+      class: "card__group",
+      dataset: group.uri ? { groupUri: group.uri } : null,
+    },
+    group.label,
+  );
 
 /**
  * Render one event card.
@@ -37,6 +54,7 @@ export function renderCard(ev, opts = {}) {
   const href = osmUrl(ev);
   const isSub = subscribed.has(ev.uri);
   const distance = formatDistance(ev.distanceKm);
+  const group = describeGroup(ev.group); // lexicon strongRef or legacy string
 
   return h(
     "article",
@@ -82,7 +100,7 @@ export function renderCard(ev, opts = {}) {
         : ev.location?.name,
       distance && h("span", { class: "card__dist" }, ` · ${distance}`),
     ),
-    ev.group && h("p", { class: "card__group" }, ev.group),
+    group && renderCardGroup(group),
     ev.tags?.length &&
       h(
         "ul",

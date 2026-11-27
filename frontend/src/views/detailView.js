@@ -2,6 +2,10 @@
  * Event detail pane: replaces the big map while an event is open (#14). Shows everything
  * about one event (when, where, what, who) plus a small pin map and the action slots for
  * Subscribe (#20), host Edit/Delete (#9), Get directions (#22) and Add to calendar (#23).
+ *
+ * Every event is read through the app.communitymap.event lexicon (lexicon/eventView.js):
+ * the view renders a sanitized "display event", and records that break the lexicon are
+ * shown best-effort with a warning instead of being trusted blindly.
  * @module views/detailView
  */
 import { h, safeHttpUrl } from "../dom.js";
@@ -13,7 +17,35 @@ import {
   osmUrl,
   statusLabel,
 } from "../format.js";
+import {
+  findLexiconIssues,
+  isEventUri,
+  isPlainObject,
+  toDisplayEvent,
+} from "../lexicon/eventView.js";
 import { createPinMap } from "./mapView.js";
+
+/** Banner shown when an event's record does not match the lexicon. */
+export const INVALID_RECORD_NOTICE =
+  "Some details of this event may be missing or incorrect.";
+
+/** "When" text for records without a usable start time. */
+export const TIME_NOT_SPECIFIED = "Time not specified";
+
+/**
+ * GET /api/event statuses that mean "there is no such event": 404 for unknown records,
+ * 400 for URIs the AppView rejects as malformed.
+ */
+const NOT_FOUND_STATUSES = new Set([400, 404]);
+
+/**
+ * Default handler for records that break the lexicon: log them so developers can see
+ * which field is wrong, while users still get the best-effort page.
+ * @param {string} uri
+ * @param {import('../lexicon/eventView.js').ValidationIssue[]} issues
+ */
+const warnInvalidRecord = (uri, issues) =>
+  console.warn(`Event ${uri} does not match the lexicon:`, issues);
 
 /**
  * @typedef {{canEdit?: boolean, subscribed?: boolean, ended?: boolean,
@@ -52,8 +84,34 @@ function renderToolbar({ onClose, onCopyLink }, eventUri) {
 }
 
 /**
- * Header: status badges, title, "This event has ended", and "Updated <time>".
- * @param {object} ev EventView
+ * Notices under the title: "This event has ended", the lexicon warning, and
+ * "Updated <time>" (only when the event was edited).
+ * @param {import('../lexicon/eventView.js').DisplayEvent} ev
+ * @param {DetailOpts} opts
+ * @param {boolean} ended
+ * @returns {(HTMLElement|false)[]}
+ */
+const renderHeaderNotices = (ev, opts, ended) => [
+  ended &&
+    h(
+      "p",
+      { class: "notice detail__ended", role: "status" },
+      "This event has ended",
+    ),
+  ev.issues.length > 0 &&
+    h("p", { class: "notice detail__invalid" }, INVALID_RECORD_NOTICE),
+  isUpdated(ev) &&
+    h(
+      "p",
+      { class: "detail__updated muted" },
+      "Updated ",
+      h("time", { datetime: ev.updatedAt }, formatDateTime(ev.updatedAt, opts)),
+    ),
+];
+
+/**
+ * Header: status badges, title, and the notices from renderHeaderNotices.
+ * @param {import('../lexicon/eventView.js').DisplayEvent} ev
  * @param {DetailOpts} opts
  * @returns {HTMLElement}
  */
@@ -74,46 +132,62 @@ function renderHeader(ev, opts) {
       { id: "detail-title", class: "detail__title", tabindex: "-1" },
       ev.name,
     ),
-    ended &&
-      h(
-        "p",
-        { class: "notice detail__ended", role: "status" },
-        "This event has ended",
-      ),
-    isUpdated(ev) &&
-      h(
-        "p",
-        { class: "detail__updated muted" },
-        "Updated ",
-        h(
-          "time",
-          { datetime: ev.updatedAt },
-          formatDateTime(ev.updatedAt, opts),
-        ),
-      ),
+    renderHeaderNotices(ev, opts, ended),
   );
 }
 
 /**
+ * "When" value in local time. Falls back gracefully when the record's times are unusable:
+ * no start → TIME_NOT_SPECIFIED; a start but no end → just the start.
+ * @param {import('../lexicon/eventView.js').DisplayEvent} ev
+ * @param {DetailOpts} opts
+ * @returns {HTMLElement}
+ */
+function renderWhen(ev, opts) {
+  if (!ev.startsAt)
+    return h("span", { class: "detail__when muted" }, TIME_NOT_SPECIFIED);
+  const text = ev.endsAt
+    ? formatEventWhen(ev.startsAt, ev.endsAt, opts)
+    : formatDateTime(ev.startsAt, opts);
+  return h("time", { datetime: ev.startsAt, class: "detail__when" }, text);
+}
+
+/**
  * Location: name (linked to OpenStreetMap when possible) and address on its own line.
- * @param {object} ev
+ * @param {import('../lexicon/eventView.js').DisplayEvent} ev
  * @returns {HTMLElement[]}
  */
 function renderLocation(ev) {
   const href = osmUrl(ev);
-  const name = ev.location?.name || "Location not specified";
+  const name = ev.location.name || "Location not specified";
   return [
     href
       ? h("a", { href, target: "_blank", rel: "noopener noreferrer" }, name)
       : h("span", null, name),
-    ev.location?.address &&
+    ev.location.address &&
       h("span", { class: "detail__address muted" }, ev.location.address),
   ];
 }
 
 /**
+ * Group label. For lexicon strongRefs the group record's URI is kept on the element
+ * (data-group-uri) so #17 can swap the placeholder label for the group's real name.
+ * @param {import('../lexicon/eventView.js').DisplayGroup} group
+ * @returns {HTMLElement}
+ */
+const renderGroup = (group) =>
+  h(
+    "span",
+    {
+      class: "detail__group",
+      dataset: group.uri ? { groupUri: group.uri } : null,
+    },
+    group.label,
+  );
+
+/**
  * Host handle linked to their Bluesky profile.
- * @param {object} ev
+ * @param {import('../lexicon/eventView.js').DisplayEvent} ev
  * @returns {HTMLElement|string}
  */
 function renderHost(ev) {
@@ -137,7 +211,7 @@ function renderHost(ev) {
 
 /**
  * Definition list of the key facts (when / where / group / host).
- * @param {object} ev
+ * @param {import('../lexicon/eventView.js').DisplayEvent} ev
  * @param {DetailOpts} opts
  * @returns {HTMLElement}
  */
@@ -149,16 +223,9 @@ function renderFacts(ev, opts) {
   return h(
     "dl",
     { class: "detail__facts" },
-    fact(
-      "When",
-      h(
-        "time",
-        { datetime: ev.startsAt, class: "detail__when" },
-        formatEventWhen(ev.startsAt, ev.endsAt, opts),
-      ),
-    ),
+    fact("When", renderWhen(ev, opts)),
     fact("Where", ...renderLocation(ev)),
-    ev.group && fact("Group", h("span", { class: "detail__group" }, ev.group)),
+    ev.group && fact("Group", renderGroup(ev.group)),
     fact("Host", renderHost(ev)),
   );
 }
@@ -318,33 +385,39 @@ function renderUpdates(updates = [], opts = {}) {
 }
 
 /**
- * Render the full detail article for an event. The `.detail__map` and `.detail__actions`
- * containers are filled in by the controller (map needs Leaflet; actions re-render often).
+ * Render the full detail article for an event. The `.detail__map` container is filled in
+ * by the controller (the map needs Leaflet). Display fields come from the sanitized
+ * display event; the action buttons receive the original EventView, so Edit / Delete
+ * hand the host's real record to the compose modal.
  * @param {object} ev EventView & {updates}
  * @param {DetailOpts} [opts]
  * @returns {HTMLElement}
  */
 export function renderDetail(ev, opts = {}) {
-  const source = safeHttpUrl(ev.sourceUrl);
-  const ended = isEnded(ev, opts.now);
+  const view = toDisplayEvent(ev);
+  const source = safeHttpUrl(view.sourceUrl);
+  const ended = isEnded(view, opts.now);
   return h(
     "article",
     {
       class: "detail",
       "aria-labelledby": "detail-title",
-      dataset: { uri: ev.uri },
+      dataset: {
+        ...(view.uri ? { uri: view.uri } : {}),
+        lexiconValid: String(view.issues.length === 0),
+      },
     },
-    renderToolbar(opts, ev.uri),
-    renderHeader(ev, opts),
-    renderFacts(ev, opts),
-    renderTags(ev.tags),
+    renderToolbar(opts, view.uri),
+    renderHeader(view, opts),
+    renderFacts(view, opts),
+    renderTags(view.tags),
     h(
       "div",
       { class: "detail__actions" },
       renderActions(ev, { ...opts, ended }),
     ),
     h("div", { class: "detail__map", "aria-label": "Event location map" }),
-    ev.description && h("p", { class: "detail__desc" }, ev.description),
+    view.description && h("p", { class: "detail__desc" }, view.description),
     source &&
       h(
         "p",
@@ -355,7 +428,7 @@ export function renderDetail(ev, opts = {}) {
           "Event page",
         ),
       ),
-    renderUpdates(ev.updates, opts),
+    renderUpdates(view.updates, opts),
   );
 }
 
@@ -419,8 +492,21 @@ const renderLoadError = (opts) =>
  *   isSubscribed?: (uri: string) => boolean, onToggleSubscribe?: (uri: string) => void,
  *   onEdit?: (ev: object) => void, onDelete?: (ev: object) => void, onClose?: () => void,
  *   onCopyLink?: (uri: string) => void, pinMapFactory?: typeof createPinMap,
- *   now?: () => Date}} DetailDeps
+ *   now?: () => Date, onInvalidRecord?: (uri: string,
+ *   issues: import('../lexicon/eventView.js').ValidationIssue[]) => void}} DetailDeps
  */
+
+/**
+ * Make sure a fetched EventView carries a URI: when the AppView leaves `uri` off, fall
+ * back to the URI that was requested, so "Copy link" and subscriptions keep working.
+ * @param {object} eventView
+ * @param {string} requestedUri
+ * @returns {object}
+ */
+const withRequestedUri = (eventView, requestedUri) =>
+  typeof eventView.uri === "string"
+    ? eventView
+    : { ...eventView, uri: requestedUri };
 
 /**
  * Create the detail pane controller.
@@ -429,6 +515,10 @@ const renderLoadError = (opts) =>
  * (`findEvent`), then refresh from GET /api/event for the full record + announcements.
  * STUB: the backend does not implement GET /api/event yet; until it does, events opened
  * from the feed still render from the feed copy, while deep links show "Could not load".
+ *
+ * Only at:// URIs of app.communitymap.event records are fetched; anything else shows
+ * "Event not found" without a request. Records that break the lexicon are reported to
+ * `onInvalidRecord` (default: console.warn) and still rendered best-effort.
  * @param {HTMLElement} root
  * @param {DetailDeps} deps
  * @returns {{open(uri: string|null): Promise<void>, close(): void, refreshActions(): void,
@@ -440,6 +530,7 @@ export function createDetailView(root, deps) {
     findEvent = () => null,
     pinMapFactory = createPinMap,
     now = () => new Date(),
+    onInvalidRecord = warnInvalidRecord,
   } = deps;
   let current = null; // {uri, event, stale}
   let pinMap = null;
@@ -463,9 +554,16 @@ export function createDetailView(root, deps) {
     if (focus) node.querySelector("#detail-title")?.focus();
   }
 
+  /** Report lexicon problems with an event (rendering continues regardless). */
+  function reportLexiconIssues(event) {
+    const issues = findLexiconIssues(event);
+    if (issues.length) onInvalidRecord(event.uri, issues);
+  }
+
   /** Render an event (and its pin map). */
   function showEvent(event, stale, options) {
     current = { uri: event.uri, event, stale };
+    reportLexiconIssues(event);
     const article = renderDetail(event, {
       stale,
       now: now(),
@@ -475,7 +573,7 @@ export function createDetailView(root, deps) {
     });
     mount(article, options);
     pinMap = pinMapFactory(article.querySelector(".detail__map"));
-    pinMap.show(event).catch(() => {
+    pinMap.show(toDisplayEvent(event)).catch(() => {
       /* createPinMap renders its own error notice */
     });
   }
@@ -486,11 +584,12 @@ export function createDetailView(root, deps) {
   };
 
   /** Apply the GET /api/event result (or failure) for the current open() call. */
-  function settle({ data, stale, error }, uri, cached) {
-    if (error?.status === 404 || (!error && !data)) return showMissing();
-    if (data) {
+  function settle({ data, stale, error } = {}, uri, cached) {
+    const notFound = NOT_FOUND_STATUSES.has(error?.status);
+    if (notFound || (!error && !isPlainObject(data))) return showMissing();
+    if (!error) {
       const focus = !cached || root.contains(document.activeElement);
-      return showEvent(data, stale, { focus });
+      return showEvent(withRequestedUri(data, uri), stale, { focus });
     }
     if (cached)
       return showEvent(cached, true, {
@@ -500,12 +599,13 @@ export function createDetailView(root, deps) {
   }
 
   /**
-   * Open an event by AT URI. `null` (a malformed link) shows "Event not found".
+   * Open an event by AT URI. `null` (a malformed link) or a URI that is not an
+   * app.communitymap.event record shows "Event not found".
    * @param {string|null} uri
    */
   async function open(uri) {
     const sequence = ++loadSequence;
-    if (!uri) return showMissing();
+    if (!isEventUri(uri)) return showMissing();
     current = { uri, event: null, stale: false };
     const cached = findEvent(uri);
     if (cached) showEvent(cached, false, { focus: true });
@@ -528,7 +628,7 @@ export function createDetailView(root, deps) {
     } catch (error) {
       result = { error };
     }
-    if (sequence === loadSequence) settle(result, uri, cached);
+    if (sequence === loadSequence) settle(result ?? undefined, uri, cached);
   }
 
   /** Re-render only the action buttons (subscription / edit rights changed). */

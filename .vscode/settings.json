@@ -1,5 +1,6 @@
 {
     "cSpell.words": [
+        "atproto",
         "dotenv",
         "fastapi",
         "itertools",

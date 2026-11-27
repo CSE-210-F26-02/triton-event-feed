@@ -25,7 +25,33 @@ export function jsonResponse(body, status = 200, headers = {}) {
   };
 }
 
-/** Sample EventView. */
+/** AppView metadata the backend adds around a lexicon record to form an EventView. */
+const APPVIEW_METADATA = Object.freeze({
+  uri: "at://did:plc:host/app.communitymap.event/3lexicon",
+  cid: "bafy-lexicon",
+  authorDid: "did:plc:host",
+  authorHandle: "host.test",
+  source: "atproto",
+  indexedAt: "2026-11-25T12:00:00.000Z",
+  updatedAt: "2026-11-25T12:00:00.000Z",
+  status: "upcoming",
+  updates: [],
+});
+
+/**
+ * EventView built from a lexicon record (e.g. one of the shared fixtures in
+ * fixtures/event/), the way the AppView flattens a record next to its metadata.
+ * `$type` is dropped because the AppView does not send it.
+ * @param {object} record app.communitymap.event record
+ * @param {object} [over] field overrides
+ * @returns {object}
+ */
+export function lexiconEventView(record, over = {}) {
+  const { $type: _type, ...fields } = record;
+  return { ...APPVIEW_METADATA, ...fields, ...over };
+}
+
+/** Sample EventView (prototype shape: plain-string group, no createdAt). */
 export function sampleEvent(over = {}) {
   return {
     uri: "at://did:plc:abc/app.communitymap.event/3kabc",

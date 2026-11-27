@@ -1,8 +1,15 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { jsonResponse, memoryStorage, sampleEvent } from "./helpers.js";
+import fullFixture from "../../fixtures/event/valid/full.json";
+import {
+  jsonResponse,
+  lexiconEventView,
+  memoryStorage,
+  sampleEvent,
+} from "./helpers.js";
 import { dayKey } from "../src/filters.js";
+import { eventHash } from "../src/router.js";
 
 globalThis.__CM_NO_AUTOSTART__ = true;
 const { start } = await import("../src/app.js");
@@ -217,16 +224,108 @@ describe("app (smoke)", () => {
     expect(mapPanel.hidden).toBe(false);
     expect(detailPanel.hidden).toBe(true);
   });
+
+  /** A valid, upcoming lexicon event (shared full fixture, shifted into the future). */
+  const upcomingLexiconEvent = () =>
+    lexiconEventView(fullFixture.record, {
+      startsAt: new Date(Date.now() + 3600e3).toISOString(),
+      endsAt: new Date(Date.now() + 7200e3).toISOString(),
+    });
+
+  /**
+   * Routes serving one lexicon event from the feed and from GET /api/event.
+   * @param {object} event
+   * @param {{inFeed?: boolean}} [options]
+   */
+  const lexiconRoutes =
+    (event, { inFeed = true } = {}) =>
+    (url) => {
+      if (url.startsWith("/api/events?"))
+        return jsonResponse({ events: inFeed ? [event] : [], cursor: null });
+      if (!url.startsWith("/api/event?")) return null;
+      const uri = new URLSearchParams(url.split("?")[1]).get("uri");
+      return uri === event.uri
+        ? jsonResponse(event)
+        : jsonResponse({ error: "NotFound" }, 404);
+    };
+
+  /** The facts a user checks on the detail page (mirrors e2e test 1 of #14). */
+  const detailFacts = (panel) => ({
+    title: panel.querySelector("#detail-title").textContent,
+    location: panel.querySelector(".detail__facts").textContent,
+    tags: [...panel.querySelectorAll(".detail__tags li")].map(
+      (li) => li.textContent,
+    ),
+    host: panel.querySelector(".detail__host").textContent,
+    group: panel.querySelector(".detail__group").textContent,
+    hasWhen: Boolean(panel.querySelector("time.detail__when")),
+    warned: Boolean(panel.querySelector(".detail__invalid")),
+  });
+
+  it("shows a lexicon event from its feed card with all its details", async () => {
+    const event = upcomingLexiconEvent();
+    await bootApp(lexiconRoutes(event));
+    document.querySelector("#list article .card__title button").click();
+    await flush();
+    await flush();
+    const panel = document.querySelector("#panel-detail");
+    expect(location.hash).toBe(eventHash(event.uri));
+    const facts = detailFacts(panel);
+    expect(facts).toMatchObject({
+      title: "Triton Hackathon Kickoff",
+      tags: ["#hackathon", "#cse", "#free-food"],
+      host: "@host.test",
+      group: "3lbxq7k2mzs2a",
+      hasWhen: true,
+      warned: false,
+    });
+    expect(facts.location).toContain("Price Center Ballroom East");
+  });
+
+  it("loads the same lexicon event when its shared link is opened in a fresh app", async () => {
+    const event = upcomingLexiconEvent();
+    await bootApp(lexiconRoutes(event));
+    document.querySelector("#list article .card__title button").click();
+    await flush();
+    await flush();
+    const fromFeed = detailFacts(document.querySelector("#panel-detail"));
+
+    // Fresh page load at the shared URL, with nothing in the feed to fall back on.
+    const fetchMock = await bootApp(lexiconRoutes(event, { inFeed: false }), {
+      initialUrl: `/${eventHash(event.uri)}`,
+    });
+    await flush();
+    const panel = document.querySelector("#panel-detail");
+    expect(panel.hidden).toBe(false);
+    expect(detailFacts(panel)).toEqual(fromFeed);
+    expect(
+      fetchMock.mock.calls.some(([u]) =>
+        u.startsWith(`/api/event?uri=${encodeURIComponent(event.uri)}`),
+      ),
+    ).toBe(true);
+  });
+
+  it("shows Event not found when a made-up link is opened in a fresh app", async () => {
+    await bootApp(lexiconRoutes(upcomingLexiconEvent()), {
+      initialUrl: "/#/event/did:plc:madeup/doesnotexist",
+    });
+    await flush();
+    expect(
+      document.querySelector("#panel-detail #detail-title").textContent,
+    ).toBe("Event not found");
+  });
 });
 
 /**
  * Boot the app against fake fetch/Leaflet. `extraRoute(url)` may return a response
- * to override the default routes.
+ * to override the default routes. `initialUrl` is the address the page "loads" at, so a
+ * test can open a shared link (e.g. "/#/event/did:plc:abc/3kabc") in a fresh app.
  * @param {(url: string) => object|null} [extraRoute]
+ * @param {{initialUrl?: string}} [options]
  * @returns {Promise<import('vitest').Mock>} the fetch mock
  */
-async function bootApp(extraRoute = () => null) {
-  history.replaceState(null, "", "/");
+async function bootApp(extraRoute = () => null, { initialUrl = "/" } = {}) {
+  history.replaceState(null, "", initialUrl);
   document.documentElement.innerHTML = html.replace(
     /<script[^>]*><\/script>/,
     "",
