@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import math
 import os
 import sqlite3
 import threading
@@ -12,8 +13,6 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
-
-import math
 
 from app.models import (
     Count,
@@ -25,7 +24,7 @@ from app.models import (
     ListenerRecord,
     Notification,
     Page,
-    SortOrder
+    SortOrder,
 )
 from app.store.base import UpsertResult
 
@@ -92,9 +91,8 @@ CREATE TABLE IF NOT EXISTS cursors (
     name TEXT PRIMARY KEY,
     value INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS events_newest ON events (created_at DESC, uri DESC);
-CREATE INDEX IF NOT EXISTS events_coords ON events (lat, lng);
 """
+
 
 def _coords(rec: EventRecord) -> tuple[float | None, float | None]:
     if rec.location.lat is None or rec.location.lng is None:
@@ -103,6 +101,7 @@ def _coords(rec: EventRecord) -> tuple[float | None, float | None]:
     if not (math.isfinite(lat) and math.isfinite(lng)):
         return None, None
     return lat, lng
+
 
 def to_iso(dt: datetime) -> str:
     """Fixed-width UTC ISO string (lexicographic order == chronological). Naive = UTC."""
@@ -129,6 +128,7 @@ def decode_cursor(cursor: str, expected_sort: SortOrder = "soonest") -> tuple[st
     if len(parts) != 3 or parts[0] != expected_sort or not parts[2]:
         raise ValueError("invalid cursor")
     return to_iso(from_iso(parts[1])), parts[2]
+
 
 def _norm_tag(tag: str) -> str:
     return tag.strip().lstrip("#").lower()

@@ -1,16 +1,16 @@
-from datetime import UTC, datetime, timedelta
 import hashlib
 import json
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 
+from app.config import Settings
+from app.deps import get_app_settings, get_store
 from app.models import BoundingBox, EventQuery, SortOrder
 from app.store.base import EventStore
 from app.views import event_view, update_view
-from app.config import Settings
-from app.deps import get_app_settings, get_store
 
 router = APIRouter(prefix="/api")
 
@@ -20,8 +20,10 @@ CACHE_CONTROL = "no-cache"
 
 SettingsDep = Annotated[Settings, Depends(get_app_settings)]
 
+
 def _visible_cutoff(now: datetime, settings: Settings) -> datetime:
     return now - timedelta(seconds=settings.expiry_grace_s)
+
 
 def _merge_tags(tag: list[str], tags: list[str]) -> list[str]:
     merged = list(tag)

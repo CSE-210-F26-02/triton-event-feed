@@ -184,6 +184,8 @@ export async function start({ baseUrl = $('meta[name="cm-api-base"]')?.content ?
   loadFacets();
   loadEvents();
   subs.load();
+  const directUri = new URLSearchParams(window.location.search).get('event');
+  if (directUri) detail.open(directUri);
   registerServiceWorker();
 }
 
@@ -222,6 +224,4 @@ function registerServiceWorker() {
 
 if (typeof window !== 'undefined' && !globalThis.__CM_NO_AUTOSTART__ && document.querySelector('#list')) {
   start();
-  const directUri = new URLSearchParams(window.location.search).get('event');
-  if (directUri) detail.open(directUri);
 }

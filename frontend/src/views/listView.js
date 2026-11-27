@@ -5,7 +5,7 @@
  */
 import { h } from '../dom.js';
 import { groupByDay, isUpdated } from '../filters.js';
-import { formatDistance, formatTimeWindow, osmUrl, statusLabel, statusBadges } from '../format.js';
+import { formatDistance, formatTimeWindow, osmUrl, statusBadges } from '../format.js';
 
 /**
  * @typedef {{onOpen?: (uri: string) => void, onTagClick?: (tag: string) => void,

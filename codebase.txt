@@ -510,39 +510,94 @@ async def post_dev_record(
     return {"ok": True}
 
 ===== FILE: backend/app/api/events.py =====
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+import hashlib
+import json
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
 
-from app.deps import get_store
-from app.models import EventQuery
+from app.models import BoundingBox, EventQuery, SortOrder
 from app.store.base import EventStore
 from app.views import event_view, update_view
+from app.config import Settings
+from app.deps import get_app_settings, get_store
 
 router = APIRouter(prefix="/api")
 
 Store = Annotated[EventStore, Depends(get_store)]
+CACHE_CONTROL = "no-cache"
+
+
+SettingsDep = Annotated[Settings, Depends(get_app_settings)]
+
+def _visible_cutoff(now: datetime, settings: Settings) -> datetime:
+    return now - timedelta(seconds=settings.expiry_grace_s)
+
+def _merge_tags(tag: list[str], tags: list[str]) -> list[str]:
+    merged = list(tag)
+    for item in tags:
+        merged.extend(part.strip() for part in item.split(",") if part.strip())
+    return merged
+
+
+def _etag_for(payload: Any) -> str:
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return f'W/"{hashlib.sha256(raw).hexdigest()[:24]}"'
+
+
+def _matches_etag(if_none_match: str | None, etag: str) -> bool:
+    if not if_none_match:
+        return False
+    target = etag.removeprefix("W/")
+    for token in if_none_match.split(","):
+        candidate = token.strip()
+        if candidate == "*" or candidate.removeprefix("W/") == target:
+            return True
+    return False
+
+
+def _cached_json(request: Request, payload: Any) -> Response:
+    etag = _etag_for(payload)
+    headers = {"ETag": etag, "Cache-Control": CACHE_CONTROL}
+    if _matches_etag(request.headers.get("if-none-match"), etag):
+        return Response(status_code=304, headers=headers)
+    return JSONResponse(content=payload, headers=headers)
 
 
 @router.get("/events")
 def list_events(
+    request: Request,
     store: Store,
-    tag: Annotated[list[str], Query(max_length=32)] = [],  # noqa: B006 (FastAPI copies it)
+    settings: SettingsDep,
+    tag: Annotated[list[str], Query(max_length=32)] = [],  # noqa: B006
+    tags: Annotated[list[str], Query(max_length=400)] = [],  # noqa: B006
     group: Annotated[str | None, Query(max_length=100)] = None,
     q: Annotated[str | None, Query(max_length=200)] = None,
     before: datetime | None = None,
     after: datetime | None = None,
+    bbox: Annotated[str | None, Query(max_length=100)] = None,
+    sort: SortOrder = "soonest",
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     cursor: Annotated[str | None, Query(max_length=1000)] = None,
-) -> dict[str, Any]:
+) -> Response:
     now = datetime.now(UTC)
+    parsed_bbox = None
+    if bbox is not None:
+        try:
+            parsed_bbox = BoundingBox.from_param(bbox)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+
     query = EventQuery(
-        tags=tag,
+        tags=_merge_tags(tag, tags),
         group=group or None,
         text=q or None,
         starts_before=before,
-        ends_after=after,
+        ends_after=after or _visible_cutoff(now, settings),
+        bbox=parsed_bbox,
+        sort=sort,
         limit=limit,
         cursor=cursor or None,
     )
@@ -550,28 +605,31 @@ def list_events(
         page = store.query_events(query, now)
     except ValueError as e:
         raise HTTPException(status_code=400, detail="invalid cursor") from e
-    return {"events": [event_view(ev, now) for ev in page.events], "cursor": page.cursor}
+
+    payload = {"events": [event_view(ev, now) for ev in page.events], "cursor": page.cursor}
+    return _cached_json(request, payload)
 
 
 @router.get("/event")
-def get_event(uri: str, store: Store) -> dict[str, Any]:
+def get_event(uri: str, request: Request, store: Store) -> Response:
     ev = store.get_event(uri)
     if ev is None:
         raise HTTPException(status_code=404, detail="event not found")
     view = event_view(ev, datetime.now(UTC))
     view["updates"] = [update_view(u) for u in store.list_updates(uri)]
-    return view
+    return _cached_json(request, view)
 
 
 @router.get("/tags")
-def list_tags(store: Store) -> list[dict[str, Any]]:
-    return [c.model_dump() for c in store.list_tags(datetime.now(UTC))]
+def list_tags(request: Request, store: Store, settings: SettingsDep) -> Response:
+    cutoff = _visible_cutoff(datetime.now(UTC), settings)
+    return _cached_json(request, [c.model_dump() for c in store.list_tags(cutoff)])
 
 
 @router.get("/groups")
-def list_groups(store: Store) -> list[dict[str, Any]]:
-    return [c.model_dump() for c in store.list_groups(datetime.now(UTC))]
-
+def list_groups(request: Request, store: Store, settings: SettingsDep) -> Response:
+    cutoff = _visible_cutoff(datetime.now(UTC), settings)
+    return _cached_json(request, [c.model_dump() for c in store.list_groups(cutoff)])
 ===== FILE: backend/app/api/imports.py =====
 """POST /api/import/ical: import events from an iCalendar feed on demand."""
 
@@ -779,7 +837,8 @@ class Settings(BaseSettings):
     dev_mode: bool = False
     # Seconds between expiry sweeps; events are dropped once endsAt + grace has passed.
     expiry_interval_s: int = 60
-    expiry_grace_s: int = 0
+    expiry_grace_s: int = 0 #change depending on how long we want it, 0 for now to test
+    expiry_purge_days: int = 7
     # Comma-separated iCal URLs polled every ical_interval_s.
     ical_feeds: str = ""
     ical_interval_s: int = 900
@@ -847,21 +906,37 @@ def _utc(dt: datetime) -> datetime:
 
 
 async def sweep_once(
-    store: EventStore, notifier: Notifier, now: datetime, grace_s: int
+    store: EventStore,
+    notifier: Notifier,
+    now: datetime,
+    grace_s: int,
+    purge_days: float = 0.0,
 ) -> list[str]:
-    cutoff = _utc(now) - timedelta(seconds=grace_s)
-    for ev in _expired_events(store, cutoff):
-        await notifier.publish(ev.uri, "expired", f"{ev.record.name} has ended")
-    removed = store.delete_expired(cutoff)
+    expiry_cutoff = _utc(now) - timedelta(seconds=grace_s)
+    for ev in _expired_events(store, expiry_cutoff):
+        subs = store.subscribers_of(ev.uri)
+        if subs:
+            await notifier.publish(ev.uri, "expired", f"{ev.record.name} has ended")
+            for sub in subs:
+                store.unsubscribe(sub, ev.uri)
+
+    purge_cutoff = expiry_cutoff - timedelta(days=purge_days)
+    removed = store.delete_expired(purge_cutoff)
     if removed:
-        log.info("expired %d event(s)", len(removed))
+        log.info("purged %d expired event(s)", len(removed))
     return removed
 
 
 async def run_expiry_loop(store: EventStore, notifier: Notifier, settings: Settings) -> None:
     while True:
         try:
-            await sweep_once(store, notifier, datetime.now(UTC), settings.expiry_grace_s)
+            await sweep_once(
+                store,
+                notifier,
+                datetime.now(UTC),
+                settings.expiry_grace_s,
+                settings.expiry_purge_days,
+            )
         except Exception:
             log.exception("expiry sweep failed")
         await asyncio.sleep(settings.expiry_interval_s)
@@ -1687,6 +1762,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
+import math
+
 EVENT_NSID = "app.communitymap.event"
 LISTENER_NSID = "app.communitymap.listener"
 POST_NSID = "app.bsky.feed.post"
@@ -1813,6 +1890,49 @@ class Count(_Camel):
     value: str
     count: int
 
+SortOrder = Literal["soonest", "newest"]
+
+
+class BoundingBox(_Camel):
+    """Geographic bounds in west,south,east,north (minLng,minLat,maxLng,maxLat) order."""
+
+    west: float
+    south: float
+    east: float
+    north: float
+
+    @model_validator(mode="after")
+    def _bounds(self) -> BoundingBox:
+        if not all(math.isfinite(v) for v in (self.west, self.south, self.east, self.north)):
+            raise ValueError("bbox coordinates must be finite numbers")
+        if not (-90.0 <= self.south <= self.north <= 90.0):
+            raise ValueError("bbox latitudes must satisfy -90 <= south <= north <= 90")
+        if not (-180.0 <= self.west <= 180.0 and -180.0 <= self.east <= 180.0):
+            raise ValueError("bbox longitudes must be between -180 and 180")
+        return self
+
+    @classmethod
+    def from_param(cls, raw: str) -> BoundingBox:
+        parts = [p.strip() for p in raw.split(",")]
+        if len(parts) != 4:
+            raise ValueError("bbox must be 'west,south,east,north'")
+        try:
+            west, south, east, north = (float(p) for p in parts)
+        except ValueError as e:
+            raise ValueError("bbox values must be numbers") from e
+        return cls(west=west, south=south, east=east, north=north)
+
+
+class EventQuery(_Camel):
+    tags: list[str] = Field(default_factory=list)  # match ANY of these tags
+    group: str | None = None
+    text: str | None = None  # case-insensitive substring over name/description/location
+    starts_before: datetime | None = None
+    ends_after: datetime | None = None  # default: now (hide expired)
+    bbox: BoundingBox | None = None
+    sort: SortOrder = "soonest"
+    limit: int = Field(default=20, ge=1, le=100)
+    cursor: str | None = None  # opaque, from Page.cursor
 ===== FILE: backend/app/notify/__init__.py =====
 
 ===== FILE: backend/app/notify/base.py =====
@@ -2200,6 +2320,8 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 
+import math
+
 from app.models import (
     Count,
     EventQuery,
@@ -2210,6 +2332,7 @@ from app.models import (
     ListenerRecord,
     Notification,
     Page,
+    SortOrder
 )
 from app.store.base import UpsertResult
 
@@ -2224,11 +2347,16 @@ CREATE TABLE IF NOT EXISTS events (
     search TEXT NOT NULL,
     starts_at TEXT NOT NULL,
     ends_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    lat REAL,
+    lng REAL,
     grp TEXT,
     indexed_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS events_order ON events (starts_at, uri);
+CREATE INDEX IF NOT EXISTS events_newest ON events (created_at DESC, uri DESC);
+CREATE INDEX IF NOT EXISTS events_coords ON events (lat, lng);
 CREATE INDEX IF NOT EXISTS events_ends ON events (ends_at);
 CREATE INDEX IF NOT EXISTS events_grp ON events (grp);
 CREATE INDEX IF NOT EXISTS events_author ON events (author_did);
@@ -2271,8 +2399,17 @@ CREATE TABLE IF NOT EXISTS cursors (
     name TEXT PRIMARY KEY,
     value INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS events_newest ON events (created_at DESC, uri DESC);
+CREATE INDEX IF NOT EXISTS events_coords ON events (lat, lng);
 """
 
+def _coords(rec: EventRecord) -> tuple[float | None, float | None]:
+    if rec.location.lat is None or rec.location.lng is None:
+        return None, None
+    lat, lng = float(rec.location.lat), float(rec.location.lng)
+    if not (math.isfinite(lat) and math.isfinite(lng)):
+        return None, None
+    return lat, lng
 
 def to_iso(dt: datetime) -> str:
     """Fixed-width UTC ISO string (lexicographic order == chronological). Naive = UTC."""
@@ -2285,21 +2422,20 @@ def from_iso(s: str) -> datetime:
     return datetime.fromisoformat(s)
 
 
-def encode_cursor(starts_at: str, uri: str) -> str:
-    return base64.urlsafe_b64encode(f"{starts_at}|{uri}".encode()).decode()
+def encode_cursor(sort: SortOrder, ts: str, uri: str) -> str:
+    return base64.urlsafe_b64encode(f"{sort}|{ts}|{uri}".encode()).decode()
 
 
-def decode_cursor(cursor: str) -> tuple[str, str]:
-    """Raises ValueError on a malformed cursor."""
+def decode_cursor(cursor: str, expected_sort: SortOrder = "soonest") -> tuple[str, str]:
+    """Raises ValueError on a malformed cursor or sort-mode mismatch."""
     try:
         raw = base64.urlsafe_b64decode(cursor.encode()).decode()
     except (binascii.Error, UnicodeDecodeError) as e:
         raise ValueError("invalid cursor") from e
-    starts_at, sep, uri = raw.partition("|")
-    if not sep or not uri:
+    parts = raw.split("|", 2)
+    if len(parts) != 3 or parts[0] != expected_sort or not parts[2]:
         raise ValueError("invalid cursor")
-    return to_iso(from_iso(starts_at)), uri
-
+    return to_iso(from_iso(parts[1])), parts[2]
 
 def _norm_tag(tag: str) -> str:
     return tag.strip().lstrip("#").lower()
@@ -2345,6 +2481,7 @@ class SqliteStore:
     def upsert_event(self, ev: IndexedEvent) -> UpsertResult:
         rec = ev.record
         rec_json = _record_json(rec)
+        lat, lng = _coords(rec)
         with self._tx() as c:
             row = c.execute(
                 "SELECT cid, record, indexed_at FROM events WHERE uri = ?", (ev.uri,)
@@ -2354,8 +2491,9 @@ class SqliteStore:
             indexed_at = row["indexed_at"] if row is not None else to_iso(ev.indexed_at)
             c.execute(
                 "INSERT OR REPLACE INTO events (uri, cid, author_did, author_handle, source,"
-                " record, search, starts_at, ends_at, grp, indexed_at, updated_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " record, search, starts_at, ends_at, created_at, lat, lng, grp,"
+                " indexed_at, updated_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     ev.uri,
                     ev.cid,
@@ -2366,6 +2504,9 @@ class SqliteStore:
                     _search_text(rec),
                     to_iso(rec.starts_at),
                     to_iso(rec.ends_at),
+                    to_iso(rec.created_at),
+                    lat,
+                    lng,
                     rec.group,
                     indexed_at,
                     to_iso(ev.updated_at),
@@ -2408,15 +2549,35 @@ class SqliteStore:
         if q.starts_before:
             where.append("starts_at < ?")
             params.append(to_iso(q.starts_before))
-        if q.cursor:
-            after_start, after_uri = decode_cursor(q.cursor)
-            where.append("(starts_at > ? OR (starts_at = ? AND uri > ?))")
-            params += [after_start, after_start, after_uri]
-        sql = f"SELECT * FROM events e WHERE {' AND '.join(where)} ORDER BY starts_at, uri LIMIT ?"
+        if q.bbox is not None:
+            where.append("lat IS NOT NULL AND lng IS NOT NULL")
+            where.append("lat >= ? AND lat <= ?")
+            params += [q.bbox.south, q.bbox.north]
+            if q.bbox.west <= q.bbox.east:
+                where.append("lng >= ? AND lng <= ?")
+                params += [q.bbox.west, q.bbox.east]
+            else:  # crosses antimeridian
+                where.append("(lng >= ? OR lng <= ?)")
+                params += [q.bbox.west, q.bbox.east]
+
+        if q.sort == "newest":
+            if q.cursor:
+                after_created, after_uri = decode_cursor(q.cursor, "newest")
+                where.append("(created_at < ? OR (created_at = ? AND uri < ?))")
+                params += [after_created, after_created, after_uri]
+            order_by, cursor_col = "created_at DESC, uri DESC", "created_at"
+        else:
+            if q.cursor:
+                after_start, after_uri = decode_cursor(q.cursor, "soonest")
+                where.append("(starts_at > ? OR (starts_at = ? AND uri > ?))")
+                params += [after_start, after_start, after_uri]
+            order_by, cursor_col = "starts_at ASC, uri ASC", "starts_at"
+
+        sql = f"SELECT * FROM events e WHERE {' AND '.join(where)} ORDER BY {order_by} LIMIT ?"
         rows = self._all(sql, [*params, q.limit + 1])
         more = len(rows) > q.limit
         rows = rows[: q.limit]
-        cursor = encode_cursor(rows[-1]["starts_at"], rows[-1]["uri"]) if more else None
+        cursor = encode_cursor(q.sort, rows[-1][cursor_col], rows[-1]["uri"]) if more else None
         return Page(events=[_row_to_event(r) for r in rows], cursor=cursor)
 
     def delete_expired(self, cutoff: datetime) -> list[str]:
@@ -2602,7 +2763,7 @@ from app.models import EventUpdate, IndexedEvent
 
 ENDING_SOON = timedelta(hours=1)
 
-Status = Literal["upcoming", "live", "ending_soon"]
+Status = Literal["upcoming", "live", "ending_soon", "ended"]
 
 
 def _utc(dt: datetime) -> datetime:
@@ -2611,6 +2772,8 @@ def _utc(dt: datetime) -> datetime:
 
 def event_status(ev: IndexedEvent, now: datetime) -> Status:
     now = _utc(now)
+    if now >= _utc(ev.record.ends_at):
+        return "ended"
     if now < _utc(ev.record.starts_at):
         return "upcoming"
     if _utc(ev.record.ends_at) - now <= ENDING_SOON:
@@ -2987,6 +3150,44 @@ def test_tags_and_groups(client, store, make_event):
     ]
     assert client.get("/api/groups").json() == [{"value": "ACM", "count": 2}]
 
+def test_events_sort_tags_bbox_and_etag(client, store, make_event, now):
+    older = make_event("a", tags=["food"], start_h=1, end_h=4)
+    newer_rec = make_event("b", tags=["music"], start_h=5, end_h=8).record.model_copy(
+        update={
+            "created_at": now + timedelta(minutes=10),
+            "location": {"name": "Downtown", "lat": "32.71", "lng": "-117.16"},
+        }
+    )
+    newer = make_event("b", tags=["music"], start_h=5, end_h=8).model_copy(
+        update={"record": newer_rec}
+    )
+    store.upsert_event(older)
+    store.upsert_event(newer)
+
+    # sort=newest
+    newest = client.get("/api/events", params={"sort": "newest"}).json()["events"]
+    assert [e["uri"].rsplit("/", 1)[1] for e in newest] == ["b", "a"]
+
+    # comma-separated tags alias
+    tagged = client.get("/api/events", params={"tags": "food,music"}).json()["events"]
+    assert len(tagged) == 2
+
+    # bbox filter + invalid bbox
+    in_box = client.get("/api/events", params={"bbox": "-117.26,32.86,-117.22,32.90"}).json()
+    assert [e["uri"].rsplit("/", 1)[1] for e in in_box["events"]] == ["a"]
+    assert client.get("/api/events", params={"bbox": "1,2,3"}).status_code == 422
+    assert client.get("/api/events", params={"bbox": "0,50,10,40"}).status_code == 422
+
+    # ETag + 304 Not Modified + invalidation on write
+    r1 = client.get("/api/events")
+    etag = r1.headers["etag"]
+    assert r1.headers["cache-control"] == "no-cache"
+    r2 = client.get("/api/events", headers={"If-None-Match": etag})
+    assert r2.status_code == 304
+
+    store.upsert_event(make_event("c", start_h=2, end_h=3))
+    r3 = client.get("/api/events", headers={"If-None-Match": etag})
+    assert r3.status_code == 200 and r3.headers["etag"] != etag
 ===== FILE: backend/tests/test_expiry.py =====
 import asyncio
 from datetime import timedelta
@@ -3974,6 +4175,9 @@ from app.models import (
     Listener,
     ListenerRecord,
     Notification,
+    EventRecord,
+    BoundingBox,
+    Location
 )
 from app.seed import seed
 from app.store.sqlite import SqliteStore, to_iso
@@ -4179,6 +4383,45 @@ def test_seed(store, now):
     assert any(e.record.ends_at - now <= timedelta(hours=1) for e in live)
     assert all(e.record.starts_at < now + timedelta(days=7) for e in page.events)
 
+def test_query_sort_newest_and_pagination(store, make_event, now):
+    for i in range(5):
+        ev = make_event(f"e{i}", start_h=10 - i, end_h=20)
+        rec = ev.record.model_copy(update={"created_at": now + timedelta(minutes=i)})
+        store.upsert_event(ev.model_copy(update={"record": rec}))
+
+    seen: list[str] = []
+    q = EventQuery(sort="newest", limit=2)
+    while True:
+        page = store.query_events(q, now)
+        seen += uris(page)
+        if page.cursor is None:
+            break
+        q = q.model_copy(update={"cursor": page.cursor})
+    assert seen == ["e4", "e3", "e2", "e1", "e0"]
+
+    # Cursor from one sort mode is rejected for the other
+    p = store.query_events(EventQuery(sort="soonest", limit=1), now)
+    with pytest.raises(ValueError):
+        store.query_events(EventQuery(sort="newest", cursor=p.cursor), now)
+
+
+def test_query_bbox_and_antimeridian(store, make_event, now):
+    def at_pos(rkey: str, lat: str | None, lng: str | None):
+        ev = make_event(rkey)
+        rec = ev.record.model_copy(update={"location": Location(name=rkey, lat=lat, lng=lng)})
+        store.upsert_event(ev.model_copy(update={"record": rec}))
+
+    at_pos("ucsd", "32.88", "-117.24")
+    at_pos("downtown", "32.71", "-117.16")
+    at_pos("nocoords", None, None)
+    at_pos("fiji_e", "-18.0", "178.0")
+    at_pos("fiji_w", "-18.0", "-178.0")
+
+    campus = BoundingBox(west=-117.26, south=32.86, east=-117.22, north=32.90)
+    assert uris(store.query_events(EventQuery(bbox=campus), now)) == ["ucsd"]
+
+    dateline = BoundingBox(west=175.0, south=-20.0, east=-175.0, north=-15.0)
+    assert set(uris(store.query_events(EventQuery(bbox=dateline), now))) == {"fiji_e", "fiji_w"}
 ===== FILE: backend/tests/test_subscriptions.py =====
 import asyncio
 
@@ -4318,6 +4561,8 @@ def test_status_naive_now(make_event, now):
     naive = (now + timedelta(minutes=1)).replace(tzinfo=None)
     assert event_view(make_event(start_h=0, end_h=3), naive)["status"] == "live"
 
+===== FILE: codebase.txt =====
+
 ===== FILE: docs/ARCHITECTURE.md =====
 # Architecture
 
@@ -4415,7 +4660,7 @@ createdAt, indexedAt, updatedAt, status}` where `status` is `upcoming | live | e
 |---|---|---|---|
 | GET | `/api/health` | | `{ok:true}` |
 | GET | `/api/config` | | `{devMode, jetstreamEnabled, eventNsid, listenerNsid}` |
-| GET | `/api/events` | `tag` (repeatable, match any), `group`, `q`, `before`, `after` (ISO), `limit`, `cursor` | `{events:[EventView], cursor}` |
+| GET | `/api/events` | `tag (repeatable) / tags (comma-separated or repeatable, match any), group, q, before, after (ISO), bbox (west,south,east,north), sort (soonest\newest), limit, cursor` | `{events:[EventView], cursor} (sets ETag + Cache-Control: no-cache; honors If-None-Match → 304)` |
 | GET | `/api/event` | `uri` | `EventView & {updates:[{text,sourceUri,createdAt}]}` or 404 |
 | GET | `/api/tags` | | `[{value,count}]` |
 | GET | `/api/groups` | | `[{value,count}]` |
@@ -4787,20 +5032,89 @@ test('feed still loads from cache when the network drops', async ({ page, contex
   await expect(page.locator('.notice--stale')).toBeVisible();
 });
 
+===== FILE: exportissues.py =====
+
+import json
+import subprocess
+import re
+
+def get_issues():
+    result = subprocess.run(
+        [
+            "gh", "issue", "list",
+            "--state", "all",
+            "--limit", "1000",
+            "--json",
+            "number,title,body,state,labels,createdAt,updatedAt"
+        ],
+        capture_output=True,
+        text=True,
+        check=True
+    )
+    return json.loads(result.stdout)
+
+
+def anonymize(text):
+    if not text:
+        return ""
+
+    # Remove email addresses
+    text = re.sub(
+        r'\b[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}\b',
+        '[EMAIL REDACTED]', text
+    )
+
+    # Remove GitHub usernames
+    text = re.sub(
+        r'(?<![\w/])@[A-Za-z0-9-]+',
+        '[USER REDACTED]', text
+    )
+
+    return text
+
+
+def main():
+    issues = get_issues()
+    output = []
+
+    for index, issue in enumerate(issues, 1):
+        output.append({
+            "id": f"ISSUE-{index}",
+            "title": anonymize(issue["title"]),
+            "body": anonymize(issue["body"]),
+            "state": issue["state"],
+            "labels": [
+                label["name"]
+                for label in issue["labels"]
+            ],
+            "created_at": issue["createdAt"],
+            "updated_at": issue["updatedAt"]
+        })
+
+    with open(
+        "issues_anonymized.json",
+        "w",
+        encoding="utf-8"
+    ) as f:
+        json.dump(output, f, indent=2, ensure_ascii=False)
+
+    print(f"Exported {len(output)} anonymized issues.")
+
+
+if __name__ == "__main__":
+    main()
+
 ===== FILE: frontend/.gitignore =====
 node_modules/
 dist/
 .env
 ===== FILE: frontend/eslint.config.js =====
+import js from "@eslint/js";
+import globals from "globals";
 import { defineConfig } from "eslint/config";
 
 export default defineConfig([
-  {
-    rules: {
-      semi: "error",
-      "prefer-const": "error",
-    },
-  },
+  { files: ["**/*.{js,mjs,cjs}"], plugins: { js }, extends: ["js/recommended"], languageOptions: { globals: globals.browser } },
 ]);
 
 ===== FILE: frontend/index.html =====
@@ -4871,9 +5185,13 @@ export default defineConfig([
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "serve": "npx --yes serve -l 5173 ."
+    "serve": "npx --yes serve -l 5173 .",
+    "lint": "eslint.js"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.16.0",
+    "globals": "^17.14.0",
     "jsdom": "^25.0.1",
     "vitest": "^2.1.8"
   }
@@ -5063,6 +5381,15 @@ import { createMapView } from './views/mapView.js';
 
 const $ = (sel) => document.querySelector(sel);
 
+function setEventUrl(uri) {
+    try {
+      const u = new URL(window.location.href);
+      if (uri) u.searchParams.set('event', uri);
+      else u.searchParams.delete('event');
+      history.replaceState(null, '', u.pathname + u.search + u.hash);
+    } catch { /* non-http test environment */ }
+  }
+
 /**
  * Start the app. API base comes from <meta name="cm-api-base"> (default: same origin).
  * @param {{baseUrl?: string}} [opts]
@@ -5122,7 +5449,7 @@ export async function start({ baseUrl = $('meta[name="cm-api-base"]')?.content ?
     }
     if (!filters.nearMe) geo.clear();
     store.set({ filters });
-    const refetch = ['tags', 'group', 'q'].some((k) => k in patch);
+    const refetch = ['tags', 'group', 'q', 'sort'].some((k) => k in patch);
     if (refetch) loadEvents();
   }
 
@@ -5137,7 +5464,7 @@ export async function start({ baseUrl = $('meta[name="cm-api-base"]')?.content ?
     onChange: (subscribed) => store.set({ subscribed }),
     onNotification: (n) => applyNotification(n),
   });
-  const detail = createDetailView({ api, canEdit, onEdit: (ev) => compose.open(ev), onDelete: (ev) => compose.remove(ev) });
+  const detail = createDetailView({api, canEdit, onEdit: (ev) => compose.open(ev),onDelete: (ev) => compose.remove(ev),onOpenUri: (uri) => setEventUrl(uri),onClose: () => setEventUrl(null)});
   const compose = createComposeView({
     getWriter: writer, geo, toast,
     onSaved: () => { toast('Event saved. It can take a few seconds to appear.'); setTimeout(() => { loadEvents(); loadFacets(); }, 1500); },
@@ -5178,6 +5505,7 @@ export async function start({ baseUrl = $('meta[name="cm-api-base"]')?.content ?
       onOpen: (uri) => detail.open(uri),
       onTagClick: (tag) => changeFilters({ tags: toggleTag(store.get().filters.tags, tag) }),
       onToggleSubscribe: toggleSubscribe,
+      sort: s.filters.sort
     });
     if (s.tab === 'map') map.show(shown);
   }
@@ -5255,6 +5583,8 @@ function registerServiceWorker() {
 
 if (typeof window !== 'undefined' && !globalThis.__CM_NO_AUTOSTART__ && document.querySelector('#list')) {
   start();
+  const directUri = new URLSearchParams(window.location.search).get('event');
+  if (directUri) detail.open(directUri);
 }
 
 ===== FILE: frontend/src/atproto.js =====
@@ -5699,7 +6029,7 @@ export function closeDialog(dialog) {
  */
 
 /** @type {FilterState} */
-export const EMPTY_FILTERS = Object.freeze({ tags: [], group: '', q: '', nearMe: false });
+export const EMPTY_FILTERS = Object.freeze({ tags: [], group: '', q: '', nearMe: false, sort: 'soonest' });
 
 /**
  * Build GET /api/events params from filter state. `nearMe` is never sent (privacy).
@@ -5707,12 +6037,16 @@ export const EMPTY_FILTERS = Object.freeze({ tags: [], group: '', q: '', nearMe:
  * @param {{cursor?: string|null, limit?: number}} [page]
  * @returns {Record<string, any>}
  */
-export function buildEventQuery(filters, { cursor = null, limit = 20 } = {}) {
+export function buildEventQuery(filters, { cursor = null, limit = 20, bbox = null } = {}) {
   const params = { limit };
   if (filters.tags?.length) params.tag = [...filters.tags];
   if (filters.group) params.group = filters.group;
   const q = (filters.q || '').trim();
   if (q) params.q = q;
+  if (filters.sort && filters.sort !== 'soonest') params.sort = filters.sort;
+  if (bbox) {
+    params.bbox = typeof bbox === 'string' ? bbox : `${bbox.west},${bbox.south},${bbox.east},${bbox.north}`;
+  }
   if (cursor) params.cursor = cursor;
   return params;
 }
@@ -5887,12 +6221,12 @@ export function osmUrl(event) {
 }
 
 /**
- * Status badge text for EventView.status, or null for "upcoming".
+ * Primary status badge text for EventView.status, or null for "upcoming".
  * @param {string} status
  * @returns {string|null}
  */
 export function statusLabel(status) {
-  return { live: 'Live', ending_soon: 'Ending soon' }[status] ?? null;
+  return { live: 'Happening now', ending_soon: 'Ending soon', ended: 'Ended' }[status] ?? null;
 }
 
 /**
@@ -5904,6 +6238,24 @@ export function formatDistance(km) {
   if (km == null) return null;
   return km < 1 ? `${Math.round(km * 1000)} m away` : `${km.toFixed(1)} km away`;
 }
+
+/**
+ * Status badge descriptors for EventView.status.
+ * @param {string} status
+ * @returns {{label: string, mod: string}[]}
+ */
+export function statusBadges(status) {
+  if (status === 'live') return [{ label: 'Happening now', mod: 'live' }];
+  if (status === 'ending_soon') {
+    return [
+      { label: 'Happening now', mod: 'live' },
+      { label: 'Ending soon', mod: 'ending_soon' },
+    ];
+  }
+  if (status === 'ended') return [{ label: 'Ended', mod: 'ended' }];
+  return [];
+}
+
 
 ===== FILE: frontend/src/geo.js =====
 /**
@@ -6648,7 +7000,8 @@ export function createComposeView({ getWriter, geo, onSaved, onDeleted, toast = 
  */
 import { closeDialog, h, openDialog, safeHttpUrl } from '../dom.js';
 import { isUpdated } from '../filters.js';
-import { formatDateTime, formatTimeWindow, osmUrl, statusLabel } from '../format.js';
+import { formatDateTime, formatTimeWindow, osmUrl, statusBadges } from '../format.js';
+
 
 /**
  * Render the dialog body for an event.
@@ -6660,15 +7013,16 @@ import { formatDateTime, formatTimeWindow, osmUrl, statusLabel } from '../format
 export function renderDetail(ev, opts = {}) {
   const href = osmUrl(ev);
   const source = safeHttpUrl(ev.sourceUrl);
-  const status = statusLabel(ev.status);
+  const badges = statusBadges(ev.status);
   const updates = [...(ev.updates || [])].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
   return [
     h('h2', { id: 'detail-title' }, ev.name),
     h('div', { class: 'card__badges' },
-      status && h('span', { class: `badge badge--${ev.status}` }, status),
+      ...badges.map((b) => h('span', { class: `badge badge--${b.mod}` }, b.label)),
       isUpdated(ev) && h('span', { class: 'badge badge--updated' }, 'Updated'),
       opts.stale && h('span', { class: 'badge' }, 'Saved copy'),
     ),
+    ev.status === 'ended' && h('p', { class: 'notice notice--ended', role: 'status' }, 'This event has ended.'),
     h('p', null, h('time', { datetime: ev.startsAt }, formatTimeWindow(ev.startsAt, ev.endsAt, opts))),
     h('p', null,
       href ? h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, ev.location?.name) : ev.location?.name,
@@ -6700,19 +7054,24 @@ export function renderDetail(ev, opts = {}) {
  *   canEdit?: (ev: object) => boolean, onEdit?: (ev: object) => void, onDelete?: (ev: object) => void}} deps
  * @returns {{open(uri: string): Promise<void>, close(): void, element: HTMLDialogElement}}
  */
-export function createDetailView({ api, canEdit = () => false, onEdit, onDelete }) {
+export function createDetailView({ api, canEdit = () => false, onEdit, onDelete, onOpenUri, onClose }) {
   const body = h('div', { class: 'dialog__body' });
+  const close = () => {
+    closeDialog(dialog);
+    onClose?.();
+  };
   const dialog = h('dialog', { class: 'dialog', 'aria-labelledby': 'detail-title' },
-    h('button', { type: 'button', class: 'btn dialog__close', 'aria-label': 'Close', onclick: () => closeDialog(dialog) }, '×'),
+    h('button', { type: 'button', class: 'btn dialog__close', 'aria-label': 'Close', onclick: close }, '×'),
     body,
   );
+  dialog.addEventListener('close', () => onClose?.());
 
   async function open(uri) {
+    onOpenUri?.(uri);
     body.replaceChildren(h('p', { id: 'detail-title', role: 'status' }, 'Loading…'));
     openDialog(dialog);
     try {
       const { data, stale } = await api.getEvent(uri);
-      const close = () => closeDialog(dialog);
       body.replaceChildren(...renderDetail(data, {
         stale,
         canEdit: canEdit(data),
@@ -6725,9 +7084,8 @@ export function createDetailView({ api, canEdit = () => false, onEdit, onDelete 
     }
   }
 
-  return { open, close: () => closeDialog(dialog), element: dialog };
+  return { open, close, element: dialog };
 }
-
 ===== FILE: frontend/src/views/filterBar.js =====
 /**
  * Filter bar: debounced text search, group select, tag chips, "Near me" toggle.
@@ -6747,7 +7105,7 @@ import { debounce } from '../util.js';
  *   nearMeBusy?: boolean}): void}}
  */
 export function createFilterBar(root, { onChange, debounceMs = 300, geoSupported = true }) {
-  let state = { tags: [], group: '', q: '', nearMe: false };
+  let state = { tags: [], group: '', q: '', nearMe: false, sort: 'soonest' };
   const emitQ = debounce((q) => onChange({ q }), debounceMs);
 
   const search = h('input', {
@@ -6755,6 +7113,10 @@ export function createFilterBar(root, { onChange, debounceMs = 300, geoSupported
     oninput: (e) => emitQ(e.target.value),
   });
   const group = h('select', { id: 'f-group', name: 'group', onchange: (e) => onChange({ group: e.target.value }) });
+  const sort = h('select', { id: 'f-sort', name: 'sort', onchange: (e) => onChange({ sort: e.target.value }) },
+    h('option', { value: 'soonest' }, 'Soonest'),
+    h('option', { value: 'newest' }, 'Newest'),
+  );
   const nearMe = h('button', {
     type: 'button', class: 'btn', 'aria-pressed': 'false', hidden: !geoSupported,
     onclick: () => onChange({ nearMe: !state.nearMe }),
@@ -6765,6 +7127,7 @@ export function createFilterBar(root, { onChange, debounceMs = 300, geoSupported
     h('div', { class: 'filters__row' },
       h('label', { for: 'f-q', class: 'visually-hidden' }, 'Search events'), search,
       h('label', { for: 'f-group', class: 'visually-hidden' }, 'Group'), group,
+      h('label', { for: 'f-sort', class: 'visually-hidden' }, 'Sort events'), sort,
       nearMe,
     ),
     chips,
@@ -6774,6 +7137,7 @@ export function createFilterBar(root, { onChange, debounceMs = 300, geoSupported
     state = next;
     if (document.activeElement !== search && search.value !== next.q) search.value = next.q;
     renderGroups(groups, next.group);
+    sort.value = next.sort || 'soonest';
     nearMe.setAttribute('aria-pressed', String(next.nearMe));
     nearMe.textContent = nearMeBusy ? 'Locating…' : 'Near me';
     renderChips(tags, next.tags);
@@ -6810,7 +7174,7 @@ export function createFilterBar(root, { onChange, debounceMs = 300, geoSupported
  */
 import { h } from '../dom.js';
 import { groupByDay, isUpdated } from '../filters.js';
-import { formatDistance, formatTimeWindow, osmUrl, statusLabel } from '../format.js';
+import { formatDistance, formatTimeWindow, osmUrl, statusLabel, statusBadges } from '../format.js';
 
 /**
  * @typedef {{onOpen?: (uri: string) => void, onTagClick?: (tag: string) => void,
@@ -6827,14 +7191,14 @@ import { formatDistance, formatTimeWindow, osmUrl, statusLabel } from '../format
 export function renderCard(ev, opts = {}) {
   const { onOpen, onTagClick, onToggleSubscribe, activeTags = [], subscribed = new Set() } = opts;
   const titleId = `ev-${hashId(ev.uri)}`;
-  const status = statusLabel(ev.status);
+  const badges = statusBadges(ev.status);
   const href = osmUrl(ev);
   const isSub = subscribed.has(ev.uri);
   const distance = formatDistance(ev.distanceKm);
 
   return h('article', { class: 'card', 'aria-labelledby': titleId, dataset: { uri: ev.uri } },
     h('div', { class: 'card__badges' },
-      status && h('span', { class: `badge badge--${ev.status}` }, status),
+      ...badges.map((b) => h('span', { class: `badge badge--${b.mod}` }, b.label)),
       isUpdated(ev) && h('span', { class: 'badge badge--updated' }, 'Updated'),
     ),
     h('h3', { class: 'card__title', id: titleId },
@@ -6911,17 +7275,27 @@ export function createListView(root, { onLoadMore, IntersectionObserverImpl = gl
     const nodes = [];
     if (state.stale) nodes.push(staleBanner(state.savedAt));
     if (state.error) nodes.push(h('p', { class: 'notice notice--error', role: 'alert' }, state.error));
-    const groups = groupByDay(state.events || [], { now: state.now, locale: state.locale });
-    if (!groups.length && !state.loading && !state.error) {
-      nodes.push(h('p', { class: 'empty' }, 'No events match your filters. Try clearing a tag or search.'));
-    }
-    for (const g of groups) {
-      const id = `day-${g.key}`;
-      nodes.push(h('section', { class: 'day', 'aria-labelledby': id },
-        h('h2', { class: 'day__title', id }, g.label),
-        h('div', { class: 'grid' }, g.events.map((ev) => renderCard(ev, state))),
+
+    const events = state.events || [];
+    if (!events.length) {
+      if (!state.loading && !state.error) {
+        nodes.push(h('p', { class: 'empty' }, 'No events match your filters. Try clearing a tag or search.'));
+      }
+    } else if (state.sort === 'newest') {
+      nodes.push(h('section', { class: 'day', 'aria-labelledby': 'sort-newest' },
+        h('h2', { class: 'day__title', id: 'sort-newest' }, 'Newest'),
+        h('div', { class: 'grid' }, events.map((ev) => renderCard(ev, state))),
       ));
+    } else {
+      for (const g of groupByDay(events, { now: state.now, locale: state.locale })) {
+        const id = `day-${g.key}`;
+        nodes.push(h('section', { class: 'day', 'aria-labelledby': id },
+          h('h2', { class: 'day__title', id }, g.label),
+          h('div', { class: 'grid' }, g.events.map((ev) => renderCard(ev, state))),
+        ));
+      }
     }
+
     if (state.loading) nodes.push(h('p', { class: 'loading', role: 'status' }, 'Loading events…'));
     if (state.hasMore) {
       nodes.push(h('button', {
@@ -7231,9 +7605,7 @@ input, select, textarea {
 /* Filters */
 .filters { display: grid; gap: 0.5rem; margin-bottom: var(--gap); }
 .filters__row { display: grid; gap: 0.5rem; grid-template-columns: 1fr; }
-@media (min-width: 40rem) {
-  .filters__row { grid-template-columns: 2fr 1fr auto; }
-}
+@media (min-width: 40rem) { .filters__row { grid-template-columns: 2fr 1fr auto auto; } }
 
 .chips {
   display: flex;
@@ -7361,13 +7733,16 @@ input, select, textarea {
   * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }
 
+.badge--ended { color: var(--muted); }
+.notice--ended { border-left-color: var(--muted); }
+
 ===== FILE: frontend/sw.js =====
 /* Community Map service worker (classic script).
  * - App shell: cache-first.
  * - GET /api/*: network-first, falling back to the cached copy (marked with x-cm-stale: 1).
  * - Never cached: non-GET requests and the SSE notification stream.
  */
-const VERSION = 'v1';
+const VERSION = 'v2';
 const SHELL_CACHE = `cm-shell-${VERSION}`;
 const API_CACHE = `cm-api-${VERSION}`;
 const SHELL = [
@@ -8448,6 +8823,569 @@ export default {
   },
 };
 
+===== FILE: issues_anonymized.json =====
+[
+  {
+    "id": "ISSUE-1",
+    "title": "Private events",
+    "body": "> [!NOTE]\n> This one is just a placeholder If we ever get to the point to start this I will break this task down\n\n# Description\nExplore support for events visible only to invited users or group members. AT Protocol records are public by default, so this needs a careful design decision before any implementation. Treat this issue as a research spike first.\n\n# User story\nAs a club officer, I want to post members-only events, so that private gatherings aren't visible to everyone on campus. (PRD 4.4 and 4.4.1 – Security: if we add private events, make sure they're secure)\n\n# Requirements for this task\n- Research spike: document options in an ADR. Examples include storing private events in our own backend instead of the PDS, encrypting record contents, or waiting for native private-data support in AT Protocol. Cover the threat model and trade-offs.\n- Proceed with implementation only after the team approves the ADR.\n- If implemented: visibility setting on events (Public / Group members only), access checks on every API route, and private events excluded from the public feed, map, feed generator (#33), and exports.\n\n# Required tests (e2e using Playwright)\n(After the ADR is approved.)\n1. Group admin creates a \"Members only\" event → a group member sees it in their feed → a non-member does not see it in the feed, on the map, or via the direct URL.\n2. A logged-out user requesting the private event's URL gets \"Event not found.\"",
+    "state": "OPEN",
+    "labels": [
+      "Core Task",
+      "Backend",
+      "Frontend",
+      "Auth",
+      "AT",
+      "Lexicon",
+      "Events",
+      "Stretch Feature",
+      "Moderation",
+      "Size-XL"
+    ],
+    "created_at": "2026-11-21T15:53:00Z",
+    "updated_at": "2026-11-21T15:53:00Z"
+  },
+  {
+    "id": "ISSUE-2",
+    "title": "Event images",
+    "body": "# Description\nLet hosts attach a cover image (e.g. a flyer) to an event. Images are stored as blobs on the host's PDS, so size limits and compression matter, as the PRD warns.\n\n# User story\nAs a club officer, I want to add our event flyer, so that the listing stands out and looks official. (PRD 5.3 – Content size; [atproto images guide](https://atproto.com/guides/images-and-video))\n\n# Requirements for this task\n- Add an optional `image` blob field with `alt` text to the event lexicon (an optional field, so it's backward compatible).\n- Upload with `com.atproto.repo.uploadBlob`; compress and resize on the client before upload; enforce a max size.\n- Alt text is required when an image is attached (accessibility).\n- Show the image on the detail page; show a small thumbnail on cards, lazy-loaded so it doesn't slow the feed on weak connections.\n- Moderation: images can be reported via #28.\n\n# Required tests (e2e using Playwright)\n1. Host attaches a flyer and alt text → posts → the detail page shows the image with the correct alt attribute.\n2. Host tries to post an image without alt text → a validation error appears.\n3. Host uploads an image over the size limit → it is compressed, or the host gets a clear error.",
+    "state": "OPEN",
+    "labels": [
+      "Backend",
+      "Frontend",
+      "Size-Medium",
+      "Lexicon",
+      "Events",
+      "P-2",
+      "Stretch Feature"
+    ],
+    "created_at": "2026-11-21T15:50:46Z",
+    "updated_at": "2026-11-21T15:53:14Z"
+  },
+  {
+    "id": "ISSUE-3",
+    "title": "Host trust indicators (verified organizations)",
+    "body": "# Description\nShow trust signals on events so users can tell official campus organizations apart from unknown accounts, as a defense against fake events. Start with simple, transparent signals instead of a complex scoring system.\n\n# User story\nAs a student, I want to know whether an event comes from a real campus organization, so that I don't go to fake events. (PRD 5.3 – Detecting fake events; user trust score)\n\n# Requirements for this task\n- ADR: choose the signals. Candidates include domain handles (e.g. a handle under a club's own domain), a team-maintained allowlist of verified org DIDs, account age, and report history (#28).\n- \"Verified org\" badge on cards, detail pages, and group pages.\n- Optional filter: **Verified hosts only** (#18).\n- Explain the badge's meaning in a tooltip; no hidden scores.\n\n# Required tests (e2e using Playwright)\n1. Seed an event from an allowlisted org DID → its card shows the **Verified org** badge.\n2. Event from a non-verified account → no badge.\n3. Turn on **Verified hosts only** → only verified events remain in the feed and on the map.",
+    "state": "OPEN",
+    "labels": [
+      "Backend",
+      "Frontend",
+      "Size-Medium",
+      "AT",
+      "Events",
+      "Stretch Feature",
+      "P-3",
+      "Moderation"
+    ],
+    "created_at": "2026-11-21T15:48:18Z",
+    "updated_at": "2026-11-21T15:48:18Z"
+  },
+  {
+    "id": "ISSUE-4",
+    "title": "Publish the events feed as an AT Protocol feed generator",
+    "body": "# Description\nExpose our event feed as an AT Protocol feed generator so it can be read outside our app, such as by other AT Protocol clients. This supports the PRD's interoperability and decentralization goals.\n\n# User story\nAs a student who mostly uses Bluesky, I want to see campus events in a feed in my usual client, so that I don't have to open a separate app. (PRD 4.3 – [atproto feeds](https://atproto.com/guides/feeds); 4.4.1 – Interoperability)\n\n# Requirements for this task\n- ADR: what goes into the feed. Feed generators return post URIs, so decide whether hosts also create an `app.bsky.feed.post` announcement for each event, or whether this targets a custom event-aware client.\n- Implement `app.bsky.feed.getFeedSkeleton` and publish the feed generator record.\n- Optional feeds per group or tag (e.g. \"UCSD Free Food\").\n\n# Required tests (e2e using Playwright)\n1. Call the feed skeleton endpoint against the local dev env → it returns announcement URIs for active events in the expected order.\n2. An expired event's announcement is no longer returned.",
+    "state": "OPEN",
+    "labels": [
+      "Backend",
+      "Frontend",
+      "Size-Medium",
+      "AT",
+      "Events",
+      "Stretch Feature",
+      "P-3",
+      "Integration"
+    ],
+    "created_at": "2026-11-21T15:46:51Z",
+    "updated_at": "2026-11-21T15:46:51Z"
+  },
+  {
+    "id": "ISSUE-5",
+    "title": "Personalized \"For you\" feed",
+    "body": "# Description\nAdd a **For you** tab next to the default **All events** feed. It ranks events using the user's follows (#25), subscriptions, and tags they interact with, which moves the feed toward the \"curated\" feed described in the PRD.\n\n# User story\nAs a student, I want the feed to show events that match my interests first, so that I don't have to scroll past things I'd never attend. (PRD 3.3 – Discover events through a curated feed)\n\n# Requirements for this task\n- Simple, explainable ranking: followed groups/tags > tags from past subscriptions > soonest start time. No machine learning.\n- Each card shows a small \"Because you follow #music\" reason.\n- Logged-out users only see **All events**.\n- `/api/events?feed=for-you` reuses the pagination and filters from #11 and #18.\n\n# Required tests (e2e using Playwright)\n1. User follows the tag `music` → opens **For you** → music events appear first, with \"Because you follow #music.\"\n2. A logged-out user doesn't see the **For you** tab.\n3. User with no follows sees **For you** fall back to the default order with a \"Follow tags to personalize\" hint.",
+    "state": "OPEN",
+    "labels": [
+      "Backend",
+      "Frontend",
+      "Size-Large",
+      "Events",
+      "Stretch Feature",
+      "P-3",
+      "Integration"
+    ],
+    "created_at": "2026-11-21T15:45:17Z",
+    "updated_at": "2026-11-21T15:45:17Z"
+  },
+  {
+    "id": "ISSUE-6",
+    "title": "Usage and performance metrics",
+    "body": "# Description\nCollect the success metrics listed in the PRD (daily users, events posted, propagation time, load times, bug counts) in a privacy-respecting way, and show them on a simple internal dashboard. This lets the team measure whether the product goals are being met.\n\n# User story\nAs a Team 2 lead, I want to see how many people use the app and how fast it is, so that we can measure product success and spot problems early. (PRD 3.1.1 and 3.1.2)\n\n# Requirements for this task\n- Track: daily and peak active users (anonymous counts), events posted per day plus a 7-day rolling average, active POIs, number of groups, edit-to-index propagation time (#5), edit-to-notification time (#20), and page load time (real-user timing).\n- Privacy: no personal data or locations; count users by a hashed DID or not at all; document what is collected. Prefer a privacy-friendly, free-tier tool or our own table.\n- Internal dashboard page restricted to team DIDs.\n- Weekly GitHub Action that posts open-bug count and average issue age (PRD 3.1.2) as a summary.\n\n# Required tests (e2e using Playwright)\n1. Seed activity (3 users, 5 events) → open the internal dashboard as a team member → the counts match.\n2. Open the dashboard as a non-team user → access denied.\n3. Post an event → the dashboard's propagation-time metric records a new data point.",
+    "state": "OPEN",
+    "labels": [
+      "Core Task",
+      "Backend",
+      "Size-Medium",
+      "P-1",
+      "Events",
+      "Performance"
+    ],
+    "created_at": "2026-11-21T15:40:37Z",
+    "updated_at": "2026-11-21T15:40:37Z"
+  },
+  {
+    "id": "ISSUE-7",
+    "title": "Offline support and caching",
+    "body": "# Description\nMake the app a Progressive Web App that caches the app shell, recently viewed events, and map tiles, so it stays usable on weak campus WiFi or briefly offline. Builds on the poor network handling from the core issues.\n\n# User story\nAs a student on spotty UCSD WiFi, I want the app to still load and show the events I've already seen, so that I'm not stuck staring at a spinner. (PRD 3.1.1 – Adapt to less-than-ideal internet; PRD 4.4 – Performance)\n\n# Requirements for this task\n- Web app manifest plus service worker (e.g. Workbox) so the app is installable.\n- Cache the app shell, the last-loaded feed page, viewed event detail pages, and recently viewed map tiles (within the tile provider's caching policy).\n- Offline banner (\"You're offline — showing saved events\"); write actions (post, subscribe) are disabled with an explanation while offline.\n- Measure load time on stable, slow 3G, and offline profiles (PRD 3.1.2) and record it in the README.\n\n# Required tests (e2e using Playwright)\n1. Load the feed and open one event → set the browser context offline → reload → the app shell, feed, and that event still render with the offline banner.\n2. While offline, click **Create event** → a message explains that posting needs a connection.\n3. Go back online → the banner disappears and fresh data loads.",
+    "state": "OPEN",
+    "labels": [
+      "Frontend",
+      "Size-Large",
+      "Events",
+      "Map",
+      "P-2",
+      "Stretch Feature",
+      "Performance"
+    ],
+    "created_at": "2026-11-21T15:38:53Z",
+    "updated_at": "2026-11-21T16:04:06Z"
+  },
+  {
+    "id": "ISSUE-8",
+    "title": "\"Near me\" with location privacy",
+    "body": "# Description\nAdd a **Near me** button that centers the map on the user's location and sorts events by distance, while making sure the user's precise location is never sent to or stored by our backend.\n\n# User story\nAs a student walking around campus, I want to see events closest to me right now, without the app tracking where I am. (PRD 5.3 – User location is a potential attack vector; we shouldn't need to store it)\n\n# Requirements for this task\n- **Near me** button asks for browser geolocation only when clicked.\n- Location stays on the device: the map recenters locally, and the API request uses only the visible map bounding box (`bbox`, #11), rounded to a coarse grid, never the exact coordinates.\n- Feed shows a distance on each card (\"0.3 mi away\"), calculated client-side.\n- No location is logged, stored, or included in analytics (#31).\n- Clear \"Location not shared\" messaging, and a graceful fallback if permission is denied.\n\n# Required tests (e2e using Playwright)\n1. Set a mocked geolocation near Price Center → click **Near me** → the map centers there and cards are sorted by distance with \"x mi away\" labels.\n2. Inspect the network requests made during step 1 → no request contains the exact mocked coordinates.\n3. Deny the geolocation permission → a friendly message appears and the map stays on the campus default.",
+    "state": "OPEN",
+    "labels": [
+      "Frontend",
+      "Size-Medium",
+      "Map",
+      "Stretch Feature",
+      "P-3",
+      "Moderation"
+    ],
+    "created_at": "2026-11-21T15:34:42Z",
+    "updated_at": "2026-11-21T15:34:42Z"
+  },
+  {
+    "id": "ISSUE-9",
+    "title": "Report events and block users",
+    "body": "# Description\nGive users basic tools to deal with fake, spam, or inappropriate events: report an event, and block a host so their events no longer appear. The team has limited moderation capacity, so most of the control is handed to users, as the PRD suggests.\n\n# User story\nAs a student, if I see a fake or offensive event, I want to report it and hide that host's events, so that the map stays trustworthy. (PRD 5.3 – Detecting fake events; content moderation)\n\n# Requirements for this task\n- **Report** action on events with reasons: fake/spam, wrong location, inappropriate, other (with an optional note).\n- Reports are stored in our database; an event with N or more reports (configurable) is hidden pending review.\n- Simple admin view (behind an allowlist of team DIDs) to review reports: restore or keep hidden.\n- **Block host**: hides all of that author's events for the current user. Consider reusing the user's Bluesky blocks (`app.bsky.graph.block`) so existing blocks apply here too.\n- Reported or blocked content is hidden in our app only; we never modify the host's PDS records.\n\n# Required tests (e2e using Playwright)\n1. User reports an event as \"Fake/spam\" → sees a confirmation → the admin view lists the report.\n2. The event reaches the report threshold → it disappears from the feed and map for everyone.\n3. User blocks a host → none of that host's events appear in their feed or map → unblocking brings them back.",
+    "state": "OPEN",
+    "labels": [
+      "Backend",
+      "Frontend",
+      "Size-Large",
+      "Events",
+      "Stretch Feature",
+      "P-3",
+      "Moderation"
+    ],
+    "created_at": "2026-11-21T15:32:11Z",
+    "updated_at": "2026-11-21T15:32:11Z"
+  },
+  {
+    "id": "ISSUE-10",
+    "title": "Import events from external sources (iCal / CSV)",
+    "body": "# Description\nLet hosts bulk-import events from an iCal feed or CSV file instead of entering each one by hand. Many campus organizations already keep calendars elsewhere, so this lowers the effort of getting onto the platform.\n\n# User story\nAs a campus organization officer, I already keep our events in Google Calendar, so I want to import them rather than re-typing each one. (PRD 3.1 – Be able to import events from different data sources)\n\n# Requirements for this task\n- **Import events** page: upload an `.ics` or `.csv` file, or paste a public iCal URL.\n- Preview screen listing the parsed events, with checkboxes to choose which to import and warnings for rows missing a location.\n- Events without coordinates go through the geocoder (#7); failures are flagged for manual fixing.\n- Selected events are written to the host's PDS as normal event records (#8); optionally assigned to one of the host's groups.\n- Skip duplicates (same title and start time already imported by this host).\n- Publish a CSV template file for download.\n\n# Required tests (e2e using Playwright)\n1. Host uploads a sample `.ics` file with 3 events → the preview shows 3 rows → host imports all → the 3 events appear in the feed and on the map.\n2. Host uploads a CSV where one row has no location → that row is flagged → host fixes it with the location picker → imports.\n3. Host imports the same file again → duplicates are detected and skipped.",
+    "state": "OPEN",
+    "labels": [
+      "Backend",
+      "Size-Medium",
+      "Events",
+      "P-2",
+      "Stretch Feature",
+      "Integration"
+    ],
+    "created_at": "2026-11-21T15:30:13Z",
+    "updated_at": "2026-11-21T15:30:13Z"
+  },
+  {
+    "id": "ISSUE-11",
+    "title": "Sync event details from Bluesky posts (\"listeners\")",
+    "body": "# Description\nLet hosts link an event to their Bluesky account so that updates they post on Bluesky (e.g. \"Moved to Room 204!\") can update the event listing. This avoids hosts having to update the same information in several places.\n\n# User story\nAs **Host Henry**, I plan and promote my event across several platforms, so I want updates I post on Bluesky to sync to my event listing automatically. (PRD 4.1; PRD 4.3 – Users can set up \"listeners\" to update their event postings from other AT Protocol services)\n\n# Requirements for this task\n- ADR: decide the matching rule. Options include replies to a linked \"announcement\" post, a hashtag, or posts that link to the event URL.\n- Host links a Bluesky post to their event from the edit page.\n- The indexer (#5) also watches `app.bsky.feed.post` records from hosts who set up a listener.\n- MVP behavior: a matching post shows up as an \"Update from host\" item on the event page. Automatically changing structured fields (time, location) is opt-in and needs confirmation.\n- Only posts by the event's own author DID can update it.\n\n# Required tests (e2e using Playwright)\n1. Host links an announcement post to their event → posts a reply on the local PDS saying \"Moved to Room 204\" → the event page shows the update within the propagation target.\n2. A different user replies to the same post → nothing appears on the event page.\n3. Host removes the link → new replies no longer appear.",
+    "state": "OPEN",
+    "labels": [
+      "Backend",
+      "Size-Medium",
+      "AT",
+      "Stretch Feature",
+      "P-3",
+      "Integration"
+    ],
+    "created_at": "2026-11-21T15:16:49Z",
+    "updated_at": "2026-11-21T15:16:49Z"
+  },
+  {
+    "id": "ISSUE-12",
+    "title": "Follow groups and tags",
+    "body": "# Description\nLet users follow a group (e.g. a club) or a tag (e.g. `free-food`) and get notified when new matching events are posted. This extends per-event subscriptions (#19) to interest-based subscriptions.\n\n# User story\nAs a student, I want to follow the clubs and topics I care about, so that I find out about their new events without checking the feed every day. (PRD 3.1 – Students can subscribe to different POIs depending on their interests)\n\n# Requirements for this task\n- **Follow** button on group pages (#17) and tag chips (#16).\n- Stored as records on the user's PDS (extend the subscription lexicon with a group/tag subject, or add a new `follow` lexicon; decide with an ADR, following the evolution rules).\n- When a new event matches a followed group or tag, create an in-app notification (#20).\n- **Following** page listing followed groups and tags, with unfollow.\n- Throttle notifications (e.g. a daily digest option) so a busy tag doesn't spam users.\n\n# Required tests (e2e using Playwright)\n1. User follows \"UCSD Hiking Club\" → the host posts a new event in that group → the user gets a \"New event from UCSD Hiking Club\" notification.\n2. User follows the tag `free-food` → a new event tagged `free-food` is posted → the user is notified.\n3. User unfollows the group → a new group event is posted → no notification.",
+    "state": "OPEN",
+    "labels": [
+      "Backend",
+      "Frontend",
+      "Size-Medium",
+      "AT",
+      "P-2",
+      "Notifications",
+      "Stretch Feature"
+    ],
+    "created_at": "2026-11-21T15:13:50Z",
+    "updated_at": "2026-11-21T15:13:50Z"
+  },
+  {
+    "id": "ISSUE-13",
+    "title": "Web push notifications for subscribed events",
+    "body": "# Description\nExtend in-app notifications (#20) with browser push notifications, so subscribers learn about changes even when the site isn't open. This matters most for last-minute changes, where polling is too slow.\n\n# User story\nAs an attendee of **Last-minute Larry's** party, I want my phone to alert me when the location changes, even if I don't have the site open. (PRD 4.1: \"Might want to consider push notifications\")\n\n# Requirements for this task\n- Service worker plus the Web Push API with VAPID keys (keys kept in env vars).\n- Opt-in only: ask for permission after the user subscribes to their first event, never on page load.\n- Settings page toggle to turn push on and off; unsubscribing from push removes the stored push subscription.\n- The backend sends a push for the same changes that create in-app notifications (#20), and uses the same batching.\n- Graceful fallback when push isn't supported (e.g. iOS Safari without the site installed to the home screen): in-app notifications still work.\n\n# Required tests (e2e using Playwright)\n1. Subscriber subscribes to an event → is prompted to enable push → grants permission (Playwright `grantPermissions(['notifications'])`) → the settings page shows push as **On**.\n2. Host edits the event → the backend sends a push to the subscriber's registered endpoint (assert via a test push endpoint or service-worker message).\n3. Subscriber turns push **Off** in settings → host edits again → no push is sent, but the in-app notification still appears.",
+    "state": "OPEN",
+    "labels": [
+      "Backend",
+      "Frontend",
+      "Size-Large",
+      "P-2",
+      "Notifications",
+      "Stretch Feature"
+    ],
+    "created_at": "2026-11-21T15:12:37Z",
+    "updated_at": "2026-11-21T15:12:37Z"
+  },
+  {
+    "id": "ISSUE-14",
+    "title": "Automated accessibility checks (axe) in Playwright",
+    "body": "# Description\nAdd automated accessibility scanning to the existing Playwright suite with `[USER REDACTED]/playwright`, so that common accessibility problems (missing labels, low contrast, bad heading order) are caught in CI. The PRD ranks accessibility as priority 5 but says it is not a focus for the MVP; this gives broad coverage cheaply.\n\n# User story\nAs a student who uses a screen reader or keyboard navigation, I want the site to be usable without a mouse, so that I can find events like everyone else. (PRD 4.4.1 – Accessibility)\n\n# Requirements for this task\n- Install `[USER REDACTED]/playwright` and add a helper that scans the current page.\n- Scan the key pages: feed/home, event detail, create event form, login, group page.\n- CI fails on `serious` and `critical` violations; `moderate` and `minor` violations are reported but don't fail the build (to start).\n- Fix any violations found on those pages, or open follow-up issues for them.\n- Add a short \"accessibility checklist\" section to `CONTRIBUTING.md`.\n\n# Required tests (e2e using Playwright)\n1. Run the axe scan on each key page → no serious or critical violations.\n2. Temporarily remove a form label in a test branch → CI fails with an axe violation pointing to that field.",
+    "state": "OPEN",
+    "labels": [
+      "good first issue",
+      "Testing",
+      "Size-Small",
+      "Frontend",
+      "P-2",
+      "Stretch Feature"
+    ],
+    "created_at": "2026-11-21T15:11:00Z",
+    "updated_at": "2026-11-25T06:59:07Z"
+  },
+  {
+    "id": "ISSUE-15",
+    "title": "\"Add to calendar\" (.ics export)",
+    "body": "# Description\nLet users add an event to their personal calendar by downloading an `.ics` file or opening a pre-filled Google Calendar link. This helps attendees remember events and lets hosts' details travel to other platforms.\n\n# User story\nAs a student, I want to add an event to my calendar in one click, so that I don't forget about it. (Related to Host Henry, PRD 4.1: event info should travel across platforms.)\n\n# Requirements for this task\n- **Add to calendar** button on the event detail page with options: **Download .ics** (Apple, Outlook) and **Google Calendar**.\n- The `.ics` file includes title, start/end in UTC, location name and address, description, and a link back to the event page.\n- Generated client-side; no backend needed.\n- Expired events (#10) don't show the button.\n\n# Required tests (e2e using Playwright)\n1. User opens an event → clicks **Add to calendar** → **Download .ics** → the downloaded file contains `BEGIN:VEVENT` with the correct title, start, end, and location.\n2. User clicks **Google Calendar** → a new tab opens with a URL containing the event title and dates.\n3. Open an expired event → no **Add to calendar** button is shown.",
+    "state": "OPEN",
+    "labels": [
+      "Size-Small",
+      "Frontend",
+      "Events",
+      "P-2",
+      "Stretch Feature"
+    ],
+    "created_at": "2026-11-21T15:09:58Z",
+    "updated_at": "2026-11-21T15:09:58Z"
+  },
+  {
+    "id": "ISSUE-16",
+    "title": "Map Integration: Open event location in other map apps",
+    "body": "# Description\nAdd a **Get directions** button to the event detail page that opens the event's location in the user's preferred map app for route planning. We don't build routing ourselves; we hand off to apps that already do it well.\n\n# User story\nAs **Tourist Timmy**, I see an event I'm interested in while visiting a new city but don't know how to get there, so I want to open it in a map app I already use to plan my route. (PRD 4.1)\n\n# Requirements for this task\n- **Get directions** button on the event detail page (#13), which opens in the event panel when a pin is selected (#37).\n- Menu with options: Google Maps, Apple Maps, OpenStreetMap, and **Copy coordinates**.\n- Build each link from the event's `lat`/`lng` (and name, when the URL format supports it); no API keys needed.\n- On mobile, links should open the native app when installed.\n- Pure frontend, no backend changes. Good starter task for learning the codebase.\n\n# Required tests (e2e using Playwright)\n1. User opens an event → clicks **Get directions** → selects **Google Maps** → a new tab opens with a URL containing the event's coordinates.\n2. User selects **Copy coordinates** → the clipboard contains `lat, lng` and a \"Copied\" toast appears.\n3. User clicks a map pin → the event opens in the side panel → **Get directions** is shown there and opens the same menu.",
+    "state": "OPEN",
+    "labels": [
+      "Size-Small",
+      "Frontend",
+      "Events",
+      "Map",
+      "P-2",
+      "Stretch Feature"
+    ],
+    "created_at": "2026-11-21T15:08:54Z",
+    "updated_at": "2026-11-21T15:08:54Z"
+  },
+  {
+    "id": "ISSUE-17",
+    "title": "Notify subscribers when an event is modified",
+    "body": "# Description\nWhen a host edits an event, every subscriber gets an in-app notification describing what changed. This completes the Last-minute Larry flow; push notifications are a follow-up, not MVP.\n\n# User story\nAs **Last-minute Larry**, I want everyone who subscribed to my party to be told about the new location quickly, so that nobody shows up at the old spot. (PRD 4.1 – updates must be delivered to attendees quickly)\n\n# Requirements for this task\n- When the indexer (#5) sees an `update` to an event, compare it with the stored version and work out which fields changed (title, time, location, description).\n- Create a notification for each subscriber, e.g. \"Larry's Birthday moved to Balboa Park, Sat 3 PM.\"\n- Notify on deletion too (\"This event was cancelled\").\n- Bell icon in the header with an unread count; a dropdown or page lists notifications, newest first; clicking one opens the event and marks it read.\n- Delivery via polling (e.g. every 30–60s and on window focus) for MVP; record the time from edit to notification (PRD 3.1.2 – propagation metric). Target: under 1 minute.\n- Batch rapid successive edits into one notification (e.g. edits within 2 minutes).\n- Hosts do not receive notifications for their own edits.\n- Out of scope (stretch): Web Push notifications (#24) and notifications for followed groups and tags (#25).\n\n# Required tests (e2e using Playwright)\nUse two browser contexts: **Host** and **Subscriber**.\n1. Subscriber subscribes to the host's event → Host edits the location and time → within the polling interval, Subscriber's bell shows **1** → Subscriber opens it → sees \"moved to <new location>, <new time>\" → clicks it → the event detail page shows the updated info and the notification is marked read.\n2. Host deletes the event → Subscriber receives an \"event was cancelled\" notification.\n3. Host makes three edits within one minute → Subscriber gets a single combined notification.\n4. Host edits their own event → Host's bell count does not change.\n5. A user who is not subscribed does not receive a notification after the edit.",
+    "state": "OPEN",
+    "labels": [
+      "Core Task",
+      "Backend",
+      "Frontend",
+      "Size-Large",
+      "AT",
+      "Events",
+      "P-2",
+      "Notifications"
+    ],
+    "created_at": "2026-11-21T15:06:48Z",
+    "updated_at": "2026-11-21T16:12:14Z"
+  },
+  {
+    "id": "ISSUE-18",
+    "title": "Subscribe and unsubscribe to events",
+    "body": "# Description\nLet logged-in users subscribe to an event so they're notified when it changes. A subscription is stored as a record on the subscriber's own PDS that references the event, which keeps it portable and visible to our indexer.\n\n# User story\nAs a student attending **Last-minute Larry's** party, I want to subscribe to the event, so that I find out right away if the location or time changes. (PRD 3.3 / 4.3 – Users can subscribe to events and receive updates)\n\n# Requirements for this task\n- New lexicon `<nsid-root>.subscription` with `subject` (strong ref to the event: URI and CID) and `createdAt`.\n- **Subscribe** button on the event detail page (and optionally on cards); it toggles to **Subscribed ✓**, and clicking unsubscribes again (`deleteRecord`).\n- Logged-out users who click **Subscribe** are sent to login, then returned to the event.\n- The indexer (#5) ingests subscription records so the backend knows who to notify.\n- **My subscriptions** page listing the user's subscribed upcoming events.\n- Subscribing to an expired event is not possible (button hidden).\n- Privacy note: subscription records are public on the user's PDS (like all AT Protocol records); show this in a tooltip or help text.\n\n# Required tests (e2e using Playwright)\n1. Logged-in user opens an event → clicks **Subscribe** → the button changes to **Subscribed ✓** → the event appears on **My subscriptions**.\n2. Reload the page → the button still shows **Subscribed ✓**.\n3. Click **Subscribed ✓** → unsubscribe → the button returns to **Subscribe** and the event is removed from **My subscriptions**.\n4. Logged-out user clicks **Subscribe** → is redirected to login → after logging in, returns to the same event page.\n5. Open an expired event → no **Subscribe** button is shown.",
+    "state": "OPEN",
+    "labels": [
+      "Core Task",
+      "Backend",
+      "Frontend",
+      "Size-Medium",
+      "P-1",
+      "AT",
+      "Events",
+      "Notifications"
+    ],
+    "created_at": "2026-11-21T15:05:15Z",
+    "updated_at": "2026-11-21T16:12:08Z"
+  },
+  {
+    "id": "ISSUE-19",
+    "title": "Filter feed and map by tags and groups",
+    "body": "# Description\nAdd filter controls so users can narrow the feed and map to the tags and groups they care about. Filters apply to both panes at once and are reflected in the URL so filtered views can be shared.\n\n# User story\nAs a student, I want to filter events to only the topics and clubs I care about, so that the feed isn't cluttered with events I'd never attend. (PRD 4.4.1 – Configurability: allow users to filter events/POIs)\n\n# Requirements for this task\n- Filter bar above the list: multi-select tags and a group selector; active filters shown as removable chips, plus **Clear all**.\n- Tag logic: an event matches if it has **any** selected tag (OR); combined with group using AND. Document this in the UI (\"Showing events tagged music or sports\").\n- `/api/events` (#11) supports `tags` and `group` query params; filtering happens server-side.\n- The list and map update together when filters change.\n- Filter state is stored in the URL query string (shareable, survives reload).\n- Empty result message: \"No events match these filters\" with a **Clear filters** button.\n\n# Required tests (e2e using Playwright)\n1. Seed events tagged `music`, `sports`, and `free-food` → select the `music` filter → only music events appear in the list and only their pins appear on the map.\n2. Add `sports` as a second tag → events tagged music or sports are shown.\n3. Select the group \"UCSD Hiking Club\" → only that group's events matching the selected tags are shown.\n4. Reload the page → the same filters are still applied; copy the URL into a new context → the same filtered view loads.\n5. Pick a filter combination with no matches → \"No events match these filters\" appears → click **Clear filters** → all events return.",
+    "state": "OPEN",
+    "labels": [
+      "Core Task",
+      "Backend",
+      "Size-Medium",
+      "P-1",
+      "Events"
+    ],
+    "created_at": "2026-11-21T15:02:12Z",
+    "updated_at": "2026-11-21T16:12:30Z"
+  },
+  {
+    "id": "ISSUE-20",
+    "title": "Groups: create groups and assign events to them",
+    "body": "# Description\nIntroduce groups: named collections of events such as a campus organization (\"UCSD Hiking Club\") or a series (\"Welcome Week 2026\"). A group is its own record on the creator's PDS, and events reference it, so that users can browse and filter all events in a group.\n\n# User story\nAs a campus organization officer, I want all of our club's events grouped together, so that members can see everything we're hosting in one place. (PRD 4.3 – Events/POIs can be assigned groups, which can be used to filter displayed data)\n\n# Requirements for this task\n- New lexicon `<nsid-root>.group` with `name`, `description`, and `createdAt`; follow the same evolution rules as #2.\n- Logged-in users can create a group from a **New group** form.\n- In the event create/edit form, the host can pick one of their groups (optional field).\n- MVP rule: only the group's creator can add events to it (multi-admin groups are out of scope; note in PRD Section 6).\n- The indexer (#5) ingests group records and the event → group references.\n- Group page: name, description, and its active events (list plus map, reusing #12 and #14).\n- The event card and detail page show the group name, linked to the group page.\n\n# Required tests (e2e using Playwright)\n1. Logged-in user clicks **New group** → enters \"UCSD Hiking Club\" and a description → saves → lands on the empty group page.\n2. The same user creates an event and selects \"UCSD Hiking Club\" as the group → saves → the event card shows the group name → clicking it opens the group page, which lists the event.\n3. A different user creates an event → \"UCSD Hiking Club\" is not available in their group dropdown.\n4. The group page's map shows pins only for events in that group.",
+    "state": "OPEN",
+    "labels": [
+      "Backend",
+      "Size-Medium",
+      "Size-Large",
+      "Lexicon",
+      "P-2"
+    ],
+    "created_at": "2026-11-21T15:00:44Z",
+    "updated_at": "2026-11-21T16:11:58Z"
+  },
+  {
+    "id": "ISSUE-21",
+    "title": "Add tags to events",
+    "body": "# Description\nLet hosts add tags (e.g., `free-food`, `music`, `career`) to events when creating or editing them, and show those tags on cards and detail pages. Tags are the basis for interest-based filtering (#19).\n\n# User story\nAs a student, I want events labeled by topic, so that I can quickly spot events that match my interests. (PRD 3.3 – Events should have tags so users can filter based on their interests)\n\n# Requirements for this task\n- Tag input in the create/edit form: type to add, autocomplete from tags already in use, remove with an ✕ or Backspace.\n- Normalize tags (lowercase, trimmed, spaces → hyphens) and enforce the lexicon limits on count and length (#2).\n- A starter list of suggested tags (e.g. `free-food`, `club`, `sports`, `music`, `academic`, `career`, `social`) is shown as quick picks.\n- Tags are saved in the event record and indexed by #5 so they can be queried.\n- Tags appear as chips on feed cards and the detail page; clicking a chip applies that tag filter (#19).\n\n# Required tests (e2e using Playwright)\n1. Host creates an event → types \"Free Food\" in the tag field → presses Enter → the chip shows `free-food` → adds `music` from suggestions → saves → the event card shows both tags.\n2. Host tries to add more than the maximum number of tags → sees a limit message and the extra tag is not added.\n3. Host edits the event → removes the `music` tag → saves → the card shows only `free-food`.\n4. A viewer clicks the `free-food` chip on a card → the feed is filtered to `free-food` events (requires #19).",
+    "state": "OPEN",
+    "labels": [
+      "good first issue",
+      "Core Task",
+      "P-0",
+      "Size-Small",
+      "Frontend",
+      "Events"
+    ],
+    "created_at": "2026-11-21T05:56:15Z",
+    "updated_at": "2026-11-21T16:11:52Z"
+  },
+  {
+    "id": "ISSUE-22",
+    "title": "Map component with event pins",
+    "body": "Description\n\nImplement the shared map component using Leaflet, rendering a pin for every active event at its location. The map should be restricted to UCSD for now only.  The tile and data source must be swappable (Overture-based or OpenStreetMap), per PRD 5.4.\n\nUser story\n\nAs Tourist Timmy, I want to see events as pins on a map, so that I can tell which ones are near me and how to get there. (PRD 4.3 – Events/POIs are displayed on a map at their specified locations)\n\nRequirements for this task\nLeaflet map, default view centered on the UCSD campus at a zoom level showing the main campus.\nTile provider configured in one place, so the team can switch between providers without code changes (PRD 5.4); respect each provider's usage policy and attribution requirements.\nOne pin per event from /api/events (#11), requested by the visible map bounds (bbox) and refreshed after pan/zoom (debounced).\nClicking a pin opens a small popup (title, time, \"View details\" link).\nPin clustering when many events overlap (e.g. Leaflet.markercluster).\nTouch-friendly on mobile (pinch-zoom, tappable pins).\nMap loads gracefully on poor connections: the list still works if tiles fail to load.\nRequired tests (e2e using Playwright)\nSeed 3 events at known campus locations → open the home page → 3 pins are on the map.\nClick a pin → the popup shows that event's title and time → click View details → the event detail page opens.\nSeed 20 events at the same spot → zoomed out, they appear as a single cluster with count 20 → click the cluster → the map zooms in and individual pins appear.\nPan the map to an area with no events → no pins are shown.\nBlock tile requests (mocked network) → the event list still loads and works.",
+    "state": "OPEN",
+    "labels": [
+      "Core Task",
+      "P-0",
+      "Frontend",
+      "Size-Medium",
+      "Map"
+    ],
+    "created_at": "2026-11-21T05:49:05Z",
+    "updated_at": "2026-11-21T16:03:44Z"
+  },
+  {
+    "id": "ISSUE-23",
+    "title": "Event detail view",
+    "body": "# Description\nCreate a pane such that shows a single event's full information. It is the landing point from feed cards and map pins, and it is where users subscribe (#20) and hosts edit (#9).\n\nReplaces the current map view with a panel that shows full event details, and the map view is shifted into the panel\n\nThere should be a location for users to subscribe to updates to the event (replace w/ a dummy endpoint if the current implementation is not added yet) and an edit button that opens up an edit event modal for the host of the event to edit details about the event\n\n# User story\nAs a student, I want to see all the details of an event in one place (when, where, what, and who's hosting), so that I can decide whether to go.\n\n# Requirements for this task\n- Shareable URL per event (based on the record's AT URI / record key).\n- Shows title, full description, start/end time in local time, location name and address, a small map with the pin, tags, group, host handle (linked to their Bluesky profile), and an \"Updated <time>\" label if the event has been edited.\n- Placeholder slots for the **Subscribe** button (#20) and host **Edit / Delete** actions (#9).\n- Leave room in the layout for the stretch actions **Get directions** (#22) and **Add to calendar** (#23).\n- Expired events show \"This event has ended\" (#10).\n- Unknown event URI → a friendly \"Event not found\" page.\n\n# Required tests (e2e using Playwright)\n1. User clicks an event card in the feed → the detail page shows the correct title, time, location, tags, and host.\n2. User copies the URL, opens it in a new browser context → the same event loads.\n3. User visits a made-up event URL → sees \"Event not found.\"\n4. Run on the mobile viewport → all details are readable without horizontal scrolling.",
+    "state": "OPEN",
+    "labels": [
+      "Core Task",
+      "P-0",
+      "Size-Small",
+      "Frontend"
+    ],
+    "created_at": "2026-11-21T05:45:48Z",
+    "updated_at": "2026-11-24T08:06:59Z"
+  },
+  {
+    "id": "ISSUE-24",
+    "title": "UI improvement",
+    "body": "# Description\nDesign review found four problems with the current build. The UI is too dark. The search bar is too small. The event list and map block each other. Finding events on a specific day means scrolling through the whole list. This issue fixes all four with a Google Maps–style layout: a full-screen map, an event panel on the right, a centered search bar, a lighter theme, and a date selector. It replaces the split-screen layout (#14) and the list/map sync (#16).\n\n# User story\nAs a student browsing campus events, I want a bright, easy-to-read map where I can search, pick a day, and click between events and pins without anything blocking my view, so that I can quickly find what's happening and where.\n\n# Requirements for this task\n\n**Lighter theme**\n- Light theme is the default. Dark mode follows the system setting, and a header toggle overrides it; the choice is saved per browser.\n- All colors come from shared theme tokens (no hard-coded colors), and the map tile style matches the theme.\n- Text and controls meet WCAG AA contrast in both themes.\n\n**Search bar**\n- Desktop: centered over the map, roughly 480–640px wide and at least 48px tall, with an icon, placeholder text (\"Search events, clubs, or places\"), and a clear (✕) button.\n- Mobile: full width at the top. Font size at least 16px.\n- Must not cover the event panel or the map controls.\n\n**Map-first layout**\n- The map fills the screen, and the event panel docks on the right (~380–420px wide), with the map visible beside it. The panel can be collapsed to show the full map.\n- The panel switches between a **list view** (event cards, date selector, filters) and a **detail view** (full event info, plus a **← Back to list** button that keeps the scroll position).\n- Mobile: full-screen map, and the panel becomes a bottom sheet the user can drag between peek, half, and full heights.\n- List and detail views have their own URLs (`/`, `/event/:id`), so the browser Back button and shared links work.\n\n**Map ↔ event selection**\n- Clicking an event card opens its details in the panel, moves the map to its pin, and highlights the pin. The pin is never hidden behind the panel.\n- Clicking a pin opens that event's details in the panel. Pin popups are removed so nothing blocks the map. Clicking a cluster zooms in.\n- Hovering a card highlights its pin, and hovering a pin highlights its card. Pins can be reached with the keyboard.\n\n**Date selection**\n- Quick picks at the top of the list: **Today**, **Tomorrow**, **This weekend**, **This week**, **All upcoming** (default).\n- A strip of the next 14 days, with a dot on days that have events, plus a calendar for picking a specific date or a date range.\n- The selected date filters both the list and the map, and combines with the tag/group filters.\n- In **All upcoming**, events are grouped under sticky day headers (\"Today\", \"Fri, Nov 27\").\n- The feed API accepts `from` and `to` parameters. The selection is stored in the URL (`?date=2026-11-27`), and dates use the viewer's local time zone.\n\n# Required tests (e2e using Playwright)\n1. Open the home page on desktop with the system set to light mode → the light theme loads, the map fills the screen, the event panel is docked on the right, and the search bar is centered at the top.\n2. Switch the theme toggle to **Dark** → reload → the dark theme is still applied → the axe contrast check passes in both themes.\n3. Click an event card → the panel shows the event's details → the map moves to its pin, which is highlighted and not hidden under the panel → click **← Back to list** → the list returns at the same scroll position.\n4. Click a different pin on the map → the panel switches to that event's details, with no popup covering the map.\n5. Click **Tomorrow** → only tomorrow's events appear in the list and on the map → tap next Friday in the day strip → only Friday's events show → reload → Friday is still selected.\n6. Select **All upcoming** → events are grouped under day headers that stay pinned while scrolling.\n7. Collapse the panel → the map is full width → reopen the panel.\n8. On a mobile viewport → the search bar is full width at the top → tap a pin → the bottom sheet rises with that event → drag the sheet up → the full details show.",
+    "state": "OPEN",
+    "labels": [
+      "Frontend",
+      "Size-Medium",
+      "UI Enhancements"
+    ],
+    "created_at": "2026-11-21T01:28:38Z",
+    "updated_at": "2026-11-21T16:11:14Z"
+  },
+  {
+    "id": "ISSUE-25",
+    "title": "Events feed API: all events, sorted",
+    "body": "# Description\nExpose an API endpoint that returns all active events from the index, sorted and paginated. This MVP version is a single \"all events\" feed; ranking and personalization come later. The same endpoint backs both the list and the map.\n\n# User story\nAs a student, I want to browse every upcoming event posted on the platform, so that I can discover clubs, pop-ups, and events around campus. (PRD 3.3 – Users can discover new events through a curated feed)\n\n# Requirements for this task\n- `GET /api/events` returns active (non-expired, see #10) events.\n- Default sort: happening-now first, then by soonest `startsAt`. Also support `sort=newest` (most recently posted). *(The sort order is still an open team decision; confirm and record it in PRD Section 6.)*\n- Cursor-based pagination (`limit`, `cursor`); default page size small enough for weak connections (e.g. 20).\n- Optional `bbox` (map bounds) parameter so the map can request only visible events.\n- Accepts `tags` and `group` filters (wired up in #19).\n- Response contains only what the list and pins need (id/URI, title, start/end, location, tags, group, author handle); keep the payload small.\n- Response caching headers / ETags for poor-WiFi performance.\n- Out of scope (stretch): publishing as an AT Protocol feed generator (#34) and personalized ranking (#33).\n\n# Required tests (e2e using Playwright)\n1. Seed 30 upcoming events → open the feed → the first 20 are shown in start-time order → scroll to the bottom → the remaining 10 load.\n2. Seed one event happening now and one starting in 1 hour → the happening-now event is listed first.\n3. Switch the sort to **Newest** → the most recently posted event is first.\n4. Pan the map to an area with no events → the list shows the empty state (once #16 links list and map bounds).",
+    "state": "CLOSED",
+    "labels": [
+      "Core Task",
+      "P-0",
+      "Backend",
+      "Size-Medium"
+    ],
+    "created_at": "2026-11-20T22:15:11Z",
+    "updated_at": "2026-11-21T01:45:25Z"
+  },
+  {
+    "id": "ISSUE-26",
+    "title": "Events feed API: all events, sorted",
+    "body": "# Description\nExpose an API endpoint that returns all active events from the index, sorted and paginated. This MVP version is a single \"all events\" feed; ranking and personalization come later. The same endpoint backs both the list and the map.\n\n# User story\nAs a student, I want to browse every upcoming event posted on the platform, so that I can discover clubs, pop-ups, and events around campus. (PRD 3.3 – Users can discover new events through a curated feed)\n\n# Requirements for this task\n- `GET /api/events` returns active (non-expired, see #10) events.\n- Default sort: happening-now first, then by soonest `startsAt`. Also support `sort=newest` (most recently posted). *(The sort order is still an open team decision; confirm and record it in PRD Section 6.)*\n- Cursor-based pagination (`limit`, `cursor`); default page size small enough for weak connections (e.g. 20).\n- Optional `bbox` (map bounds) parameter so the map can request only visible events.\n- Accepts `tags` and `group` filters (wired up in #19).\n- Response contains only what the list and pins need (id/URI, title, start/end, location, tags, group, author handle); keep the payload small.\n- Response caching headers / ETags for poor-WiFi performance.\n- Out of scope (stretch): publishing as an AT Protocol feed generator (#34) and personalized ranking (#33).\n\n# Required tests (e2e using Playwright)\n1. Seed 30 upcoming events → open the feed → the first 20 are shown in start-time order → scroll to the bottom → the remaining 10 load.\n2. Seed one event happening now and one starting in 1 hour → the happening-now event is listed first.\n3. Switch the sort to **Newest** → the most recently posted event is first.\n4. Pan the map to an area with no events → the list shows the empty state (once #16 links list and map bounds).",
+    "state": "OPEN",
+    "labels": [
+      "Core Task",
+      "P-0",
+      "Backend",
+      "Size-Medium"
+    ],
+    "created_at": "2026-11-20T21:59:14Z",
+    "updated_at": "2026-11-21T16:10:48Z"
+  },
+  {
+    "id": "ISSUE-27",
+    "title": "Hide events after their time window ends",
+    "body": "# Description\nEvents should expire gracefully once their time window ends. We can't delete records from other users' PDSes, so \"removing\" an event means excluding it from our index's feed, map, and filters after `endsAt` (plus a short grace period), and later purging it from our database.\n\n# User story\nAs a student, I want the feed and map to show only events that are still happening or upcoming, so that I don't waste time on events that are already over. (PRD 3.1 – Posted events should be able to expire gracefully; PRD 4.3)\n\n# Requirements for this task\n- Feed and map queries exclude events whose `endsAt` + grace period (configurable, default 1 hour) is in the past.\n- Events currently in progress show a \"Happening now\" badge.\n- A scheduled job purges events from our database N days after expiry (configurable); the host's PDS record is untouched.\n- A direct link to an expired event's detail page shows \"This event has ended\" instead of a 404.\n- Time comparisons use UTC on the server; display uses the viewer's local time.\n\n# Required tests (e2e using Playwright)\n1. Seed an event that ended 2 hours ago and one starting tomorrow → open the feed → only tomorrow's event is shown, and the map has only its pin.\n2. Seed an event that runs from 30 minutes ago to 1 hour from now → it shows in the feed with a \"Happening now\" badge.\n3. Visit the URL of an expired event directly → the page says \"This event has ended.\"\n4. Seed an event that ends 1 minute from now (grace period set to 0 in the test config) → wait, reload → the event is gone",
+    "state": "OPEN",
+    "labels": [
+      "Core Task",
+      "Size-Small",
+      "Backend",
+      "P-1"
+    ],
+    "created_at": "2026-11-20T21:54:14Z",
+    "updated_at": "2026-11-21T16:10:16Z"
+  },
+  {
+    "id": "ISSUE-28",
+    "title": "Edit and delete own events",
+    "body": "# Description\nLet hosts update or remove events they created. Updates use `com.atproto.repo.putRecord`, and deletes use `deleteRecord`. Editing is what drives subscriber notifications (#21), so changes must reach the index quickly.\n\n# User story\nAs **Last-minute Larry**, I planned a party at a public park but had to move it at the last minute, so I want to update the event's location and have attendees see the change quickly.\n\n# Requirements for this task\n- **Edit** and **Delete** actions are visible only on events the logged-in user authored (author DID matches the session DID).\n- Edit reuses the create form (#6, #7, #17), pre-filled with current values.\n- Save calls `putRecord` on the same record key; the indexer (#5) records the change and updates `updatedAt`.\n- Delete asks for confirmation (in-page, not a browser `confirm()` dialog) and then calls `deleteRecord`.\n- An event that was edited shows an \"Updated <time>\" label on its detail page.\n\n# Required tests (e2e using Playwright)\n1. Host opens their own event → clicks **Edit** → changes the location to another park and the start time → saves → the detail page, feed card, and map pin all show the new values.\n2. A different logged-in user opens the same event → **Edit** and **Delete** are not visible.\n3. Host clicks **Delete** → confirms → the event disappears from the feed and the map.\n4. Host clicks **Delete** → cancels → the event is still there.",
+    "state": "OPEN",
+    "labels": [
+      "Backend",
+      "Frontend",
+      "Size-Medium"
+    ],
+    "created_at": "2026-11-20T21:50:06Z",
+    "updated_at": "2026-11-21T16:10:12Z"
+  },
+  {
+    "id": "ISSUE-29",
+    "title": "Publish event record to the host's PDS",
+    "body": "# Description\nWhen the host submits the create-event form, write the event as a record to their PDS using `com.atproto.repo.createRecord`. This makes the event the host's own data and lets the indexer (#5) pick it up for everyone else.\n\n# User story\nAs **Host Henry**, I want my event saved to my own Bluesky data repository, so that I own my event data and it can be used across AT Protocol apps.\n\n# Requirements for this task\n- On submit, build a record that validates against the lexicon (#2) and write it with `createRecord` using the authenticated session (#3 / #4).\n- Show a loading state while the write is in progress; disable double-submit.\n- Optimistic UI: the new event appears in the host's view immediately, then reconciles once the indexer picks it up.\n- On failure (network, PDS error, expired session), keep the form data and let the user retry.\n- After success, redirect to the event detail page (#13).\n\n# Required tests (e2e using Playwright)\n1. Logged-in host completes the form → clicks **Post** → is redirected to the new event's detail page → the event also appears in the feed and on the map.\n2. Simulate a network failure on submit → the host sees an error, the form keeps their input, they click **Retry** → it succeeds.\n3. Double-click **Post** quickly → only one event is created.\n4. Run step 1 with a throttled (slow 3G) network → the loading state appears and the post eventually succeeds.",
+    "state": "OPEN",
+    "labels": [
+      "P-0",
+      "Backend",
+      "Size-Medium"
+    ],
+    "created_at": "2026-11-20T21:15:37Z",
+    "updated_at": "2026-11-21T16:10:10Z"
+  },
+  {
+    "id": "ISSUE-30",
+    "title": "Location picker for event",
+    "body": "# Description\nLet hosts set an event's location by searching for a place or address. The chosen location becomes the event's `location` field and determines where its pin appears on the main map.\n\n# User story\nAs **Host Henry**, I want to set exactly where my event is happening, so that attendees can find it on the map. (PRD 4.3 – Events/POIs are displayed on a map at their specified locations)\n\n# Requirements for this task\n- A location field in the create/edit form with two input modes:\n  - **Search:** type a place or address, then pick from suggestions (geocoding provider TBD and documented in an ADR; avoid the Google Maps API per PRD 5.4, consider Nominatim/Photon and respect their usage policies).\n  - **Drop pin:** click or tap a small Leaflet map to set coordinates; the pin can be dragged to adjust.\n- Optional free-text \"location name\" (e.g. \"Price Center Plaza, by the fountain\").\n- Default map view centers on the UCSD campus.\n- Saves `lat`/`lng` plus the optional name and address into the lexicon `location` object (#2).\n- The picker never asks for or sends the user's own GPS location unless they explicitly tap \"Use my location\" (PRD 5.3). The browse-side \"Near me\" feature is stretch issue #30.\n\n# Required tests (e2e using Playwright)\n1. Host opens **Create event** → types \"Geisel Library\" into location search → selects the first suggestion → the mini-map pin moves there → host saves the event → the event's pin on the main map is at Geisel.\n2. Host switches to **Drop pin** → clicks a spot on the mini-map → drags the pin → the coordinates update → saves → the main map pin matches.\n3. Host submits without a location → sees a \"Location is required\" error.\n4. Geocoding service returns an error (mocked) → the host sees a message and can still drop a pin manually.",
+    "state": "OPEN",
+    "labels": [
+      "Core Task",
+      "Frontend",
+      "Size-Medium"
+    ],
+    "created_at": "2026-11-20T21:11:46Z",
+    "updated_at": "2026-11-21T16:10:07Z"
+  },
+  {
+    "id": "ISSUE-31",
+    "title": "Create event form: title, description, date/time window",
+    "body": "# Description\nBuild the form hosts use to create an event, covering the title, description, and start/end date and time. Location (#7) and tags (#17) plug into this form. Saving to the PDS is handled in #8.\n\n# User story\nAs **Host Henry**, I want to post an event with a clear time window and description, so that students know what is happening and when. (PRD 3.3 – Event hosts can post events with a time window and location)\n\n# Requirements for this task\n- **Create event** button visible to logged-in users; opens a form (page or modal).\n- Fields: title (required), description (optional, multiline, with a character counter), start date/time (required), end date/time (required).\n- Date and time pickers work on mobile, and the time zone shown is the user's local time zone.\n- Validation: the end must be after the start, the start cannot be in the past, and field lengths match lexicon limits (#2). Errors appear inline next to the field.\n- Inline validation errors must be accessible (associated with their inputs, announced to screen readers).\n- Unsaved changes trigger a warning if the user navigates away.\n\n# Required tests (e2e using Playwright)\n1. Logged-in user clicks **Create event** → fills in title, description, tomorrow 6–8 PM, and a location → submits → sees the success state.\n2. User sets an end time earlier than the start time → sees \"End must be after start,\" and the submit button stays disabled.\n3. User leaves the title blank → sees a required-field error.\n4. User picks a start date in the past → sees a validation error.\n5. Run step 1 on the mobile viewport → the date/time pickers are usable and the form fits the screen.",
+    "state": "OPEN",
+    "labels": [
+      "P-0",
+      "Frontend",
+      "Size-Medium"
+    ],
+    "created_at": "2026-11-20T20:56:43Z",
+    "updated_at": "2026-11-21T16:10:04Z"
+  },
+  {
+    "id": "ISSUE-32",
+    "title": "Event indexer: ingest event records from the network",
+    "body": "# Description\nBuild the backend service (our AppView) that listens to the AT Protocol network for event records and stores them in a queryable database. Events live on each host's PDS, so the feed, map, filters, and notifications all depend on this index.\n\n# User story\nAs a student, I want to see events from every host in one place, so that I don't have to follow each organization separately. (PRD 3.1 – Students can find clubs, pop-ups, and events around UCSD)\n\n# Requirements for this task\n- Subscribe to Jetstream (or the firehose) filtered to our collections (`<nsid-root>.event`, and later group and subscription records).\n- Handle `create`, `update`, and `delete` commits; store the record URI, CID, author DID, fields, `indexedAt`, and `updatedAt`.\n- Validate every record against the lexicon (#2); log and skip invalid records instead of crashing.\n- Persist the stream cursor so that a restart resumes without missing or duplicating events.\n- Database choice and schema recorded in an ADR (must fit the free-tier hosting constraint, PRD 5.2).\n- Record how long a new post takes to appear in the index (PRD 3.1.2 – propagation-time metric).\n- Store only event locations, never user locations (PRD 5.3).\n\n# Required tests (e2e using Playwright)\n1. A seeded user creates an event record directly on the local PDS → within N seconds, the event appears in the feed at `/`.\n2. The user edits the record on the PDS → the feed shows the new title after reload.\n3. The user deletes the record → the event disappears from the feed.\n4. Restart the indexer mid-test → events created during downtime still appear afterwards.\n",
+    "state": "OPEN",
+    "labels": [
+      "P-0",
+      "Backend",
+      "AT",
+      "Lexicon"
+    ],
+    "created_at": "2026-11-20T20:50:07Z",
+    "updated_at": "2026-11-21T16:09:59Z"
+  },
+  {
+    "id": "ISSUE-33",
+    "title": "Login with Bluesky OAuth",
+    "body": "# Description\nReplace app-password login with AT Protocol OAuth as the default sign-in method, so users never type a password into our site. App-password login stays available only behind a dev flag.\n\n# User story\nAs a student, I want to sign in through Bluesky's own authorization screen, so that I never have to give my password to a third-party site.\n\n# Requirements for this task\n- Implement atproto OAuth (PKCE, PAR, DPoP) using the official client library (e.g. `[USER REDACTED]/oauth-client-browser` or `-node`, depending on architecture).\n- Publish the client metadata document at a public URL; use the loopback client for localhost development.\n- Request only the scopes the app needs.\n- Implement the same `AuthProvider` interface from #3; app-password login is hidden unless a `DEV_AUTH=app-password` flag is set.\n- Handle a denied consent, an expired session, and token refresh.\n- Document the setup steps (client metadata hosting, redirect URIs) in the README.\n\n# Required tests (e2e using Playwright)\n1. User clicks **Log in with Bluesky** → enters their handle → is redirected to the PDS authorization page (local dev-env PDS) → approves → returns to the feed, logged in.\n2. User denies consent on the authorization page → returns to the site with a \"login cancelled\" message.\n3. With the dev flag off, the app-password form is not visible.\n4. A session whose access token has expired is refreshed silently on the next action.\n",
+    "state": "OPEN",
+    "labels": [
+      "Backend",
+      "Frontend",
+      "Auth",
+      "Size-Large",
+      "P-1"
+    ],
+    "created_at": "2026-11-20T20:44:31Z",
+    "updated_at": "2026-11-21T16:09:55Z"
+  },
+  {
+    "id": "ISSUE-34",
+    "title": "Login with Bluesky app password (dev auth)",
+    "body": "# Description\nLet users sign in with their Bluesky handle and an app password, so that development and testing can start before OAuth is ready. This creates an authenticated session against the user's PDS that later issues use to write records.\n\n# User story\nAs a student, I want to log in with my existing Bluesky account, so that I can post and subscribe to events without creating a new account.\n\n# Requirements for this task\n- Login page with a handle field (e.g. `alice.bsky.social`) and an app-password field, plus a link to Bluesky's app-password settings page.\n- Resolve the handle → DID → PDS endpoint, then call `com.atproto.server.createSession`.\n- Store only the session tokens (`accessJwt` / `refreshJwt`), never the app password itself; refresh the access token automatically.\n- Show the logged-in user's handle and avatar in the header; add a logout action that clears the session.\n- Write actions (post event, subscribe) require login; browsing the feed and map does not.\n- Friendly error states: wrong password, handle not found, PDS unreachable.\n- Put the auth code behind an interface (`AuthProvider`) so that OAuth (#4) can be swapped in without changing callers.\n- Show a visible \"dev login\" notice in the UI explaining that app passwords are temporary until OAuth ships.\n\n# Required tests (e2e using Playwright)\n1. User opens the site → clicks **Log in** → enters a seeded test handle and app password → is redirected to the feed with their handle shown in the header.\n2. User enters a wrong app password → sees an error message and stays on the login page.\n3. Logged-in user reloads the page → stays logged in.\n4. User clicks **Log out** → the header shows **Log in** again, and visiting **Create event** redirects to the login page.\n5. A",
+    "state": "OPEN",
+    "labels": [
+      "Core Task",
+      "P-0",
+      "Frontend",
+      "Size-Medium",
+      "DevTools"
+    ],
+    "created_at": "2026-11-20T20:32:25Z",
+    "updated_at": "2026-11-21T16:09:53Z"
+  },
+  {
+    "id": "ISSUE-35",
+    "title": "Define the `event` lexicon schema",
+    "body": "# Description\nDefine the AT Protocol lexicon for event records. Every other feature (posting, feed, map, tags, groups, subscriptions) reads or writes this schema. The PRD flags breaking schema changes as a key risk, so the schema has to be designed with lexicon evolution rules in mind from day one.\n\n# User story\nAs an event host, I want my event saved in a standard, well-defined format on my own PDS, so that the event is portable and other AT Protocol apps can read it. (PRD 4.4.1 – Interoperability; Host Henry)\n\n# Requirements for this task\n- Evaluate reusing or extending an existing community lexicon (e.g. `community.lexicon.calendar.event`) before writing our own; document the decision as an ADR.\n- If we define our own: NSID `<nsid-root>.event`, where `<nsid-root>` is a domain the team controls (placeholder: `app.communitymap`).\n- Required fields: `name` (string, max length), `startsAt` (datetime), `endsAt` (datetime), `location`, `createdAt` (datetime).\n- Optional fields: `description` (string, max length), `tags` (array of strings, max count and max length each), `group` (strong ref to a group record, see #18).\n- `location` object: `lat`, `lng` (stored as strings or fixed-precision integers, because lexicon has no float type), optional `name` and `address`.\n- Follow [lexicon evolution rules](https://atproto.com/specs/lexicon#lexicon-evolution): new fields are optional, no field is removed or renamed after release.\n- Shared validation module (TypeScript types plus runtime validator) generated from the lexicon and used by both frontend and backend.\n- Unit tests for valid and invalid records (missing fields, `endsAt` before `startsAt`, tag over limit).\n\n# Required tests (e2e using Playwright)\nNo direct UI for this issue. Its E2E coverage comes through #6 and #8. Acceptance for this issue is the unit test suite above passing in CI, plus:\n1. A seeded event record in the local PDS validates against the lexicon.\n2. A malformed record is rejected by the validator with a clear error message.\n",
+    "state": "OPEN",
+    "labels": [
+      "good first issue",
+      "Core Task",
+      "P-0",
+      "Size-Small",
+      "Backend"
+    ],
+    "created_at": "2026-11-20T20:30:29Z",
+    "updated_at": "2026-11-21T16:09:48Z"
+  },
+  {
+    "id": "ISSUE-36",
+    "title": "Project scaffolding, CI, and Playwright E2E harness",
+    "body": "# Description\nSet up the repository structure, local dev environment, and CI pipeline so every later issue can ship with Playwright end-to-end tests. Because the PRD ranks maintainability and testability (TDD) as the top non-functional requirement, test infrastructure comes first, before any feature work.\n\n# User story\nAs a developer on Team 2, I want a working project skeleton with automated E2E tests running in CI, so that I can build features test-first and catch regressions before they reach users. (PRD 4.4.1 – Maintainability / Testability)\n\n# Requirements for this task\n- Repo scaffolded with the agreed frontend approach (framework decision is still open in PRD 5.4; record it in Section 6 / an ADR).\n- Playwright installed and configured with at least a desktop Chromium project and a mobile viewport project (e.g. Pixel / iPhone), because the PRD calls for mobile-friendly behavior.\n- A local AT Protocol test environment for E2E runs (e.g. `[USER REDACTED]/dev-env` running a local PDS), so tests never post to real Bluesky accounts.\n- Seed script that creates test accounts and sample events in the local PDS.\n- Secrets (test app passwords, OAuth keys) loaded from environment variables only; `.env` is in `.gitignore`, and a `.env.example` file is committed.\n- CI (GitHub Actions) runs lint, unit tests, and Playwright on every PR; Playwright traces and screenshots are uploaded as artifacts when a test fails.\n- A reusable Playwright helper for network throttling (slow 3G profile) so later issues can test poor-WiFi behavior (PRD 4.4 – Performance).\n- README section: how to run the app and the tests locally.\n\n# Required tests (e2e using Playwright)\n1. Developer runs `npm run test:e2e` locally → the local PDS starts, seed data loads, and a smoke test opens the home page and asserts that the app shell renders.\n2. Open a PR → CI runs the same smoke test on desktop and mobile viewports, and the PR shows a green check.\n3. Force the smoke test to fail → CI marks the PR red and attaches the Playwright trace.\n",
+    "state": "OPEN",
+    "labels": [
+      "Core Task",
+      "P-0",
+      "Testing",
+      "DevOps",
+      "Size-Small"
+    ],
+    "created_at": "2026-11-20T20:26:52Z",
+    "updated_at": "2026-11-21T16:08:50Z"
+  }
+]
 ===== FILE: lexicons/app.communitymap.event.json =====
 {
   "lexicon": 1,
