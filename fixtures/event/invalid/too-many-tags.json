@@ -1,0 +1,28 @@
+{
+  "description": "11 tags, one more than the maximum of 10.",
+  "expectedErrorContains": "tags",
+  "record": {
+    "$type": "app.communitymap.event",
+    "name": "Study Jam at Geisel Library",
+    "startsAt": "2026-12-01T18:00:00.000Z",
+    "endsAt": "2026-12-01T21:00:00.000Z",
+    "location": {
+      "lat": "32.8812",
+      "lng": "-117.2375"
+    },
+    "createdAt": "2026-11-20T09:30:00.000Z",
+    "tags": [
+      "study",
+      "finals",
+      "library",
+      "quiet",
+      "coffee",
+      "cse",
+      "math",
+      "group",
+      "geisel",
+      "late-night",
+      "snacks"
+    ]
+  }
+}

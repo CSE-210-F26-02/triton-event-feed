@@ -5,7 +5,7 @@
   "main": "script.js",
   "scripts": {
     "dev": "vite",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "vitest run",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
     "format": "prettier --write .",
     "format-check": "prettier --check ."
@@ -19,6 +19,11 @@
   },
   "dependencies": {
     "@atproto/api": "^0.32.7",
-    "@atproto/oauth-client-browser": "^0.5.17"
+    "@atproto/oauth-client-browser": "^0.5.17",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.2"
+  },
+  "dependencies": {
+    "@atproto/lexicon": "^0.7.22"
   }
 }
