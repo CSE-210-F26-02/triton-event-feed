@@ -28,3 +28,11 @@ jobs:
             - name: Run prettier checks
               run: black --check .
               working-directory: ./backend
+            - name: Install pytest
+              run: pip install --only-binary :all: pytest==9.2.0 pytest-asyncio==1.4.1.post1
+              working-directory: ./backend
+            # pytest reads its settings from pyproject.toml, which adds the repo
+            # root to the import path so "from backend.lexicon import ..." works.
+            - name: Run unit tests
+              run: pytest
+              working-directory: ./backend

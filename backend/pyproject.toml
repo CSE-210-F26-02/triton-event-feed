@@ -1,22 +1,27 @@
 [project]
-name = "community-map-backend"
+name = "triton-event-feed-backend"
 version = "0.1.0"
-requires-python = ">=3.11"
+description = "Backend for the Triton Event Feed application."
+readme = "README.md"
+requires-python = ">=3.12"
 dependencies = [
-  "fastapi==0.162.5",
-  "uvicorn[standard]==0.54.0",
-  "pydantic==2.14.3",
-  "pydantic-settings==2.16.2",
-  "websockets==17.4",
-  "httpx==0.28.1",
-  "icalendar==7.3.0",
+    "dotenv>=0.9.9",
+    "fastapi>=0.163.1",
+    "httpx==0.28.1",
+    "icalendar==7.3.0",
+    "pydantic==2.14.3",
+    "pydantic-settings==2.16.2",
+    "regex>=2026.11.25",
+    "uvicorn[standard]==0.54.0",
+    "websockets==17.4",
 ]
 
-[project.optional-dependencies]
-dev = ["pytest==9.2.0", "pytest-asyncio==1.4.1.post1", "ruff==0.17.4"]
+[dependency-groups]
+dev = ["pytest>=9.2.0", "pytest-asyncio==1.4.1.post1", "ruff==0.17.4"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+pythonpath = [".."]
 testpaths = ["tests"]
 
 [tool.ruff]
@@ -35,4 +40,4 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["app*"]
+include = ["app*", "lexicon*"]

@@ -1,11 +1,18 @@
 {
-  "name": "community-map-frontend",
+  "name": "triton-event-feed",
+  "version": "1.0.0",
+  "description": "frontend for triton-event-feed",
+  "main": "script.js",
   "private": true,
   "type": "module",
+  "author": "CSE 210 Team 2",
+  "license": "ISC",
   "scripts": {
+    "dev": "vite",
     "test": "vitest run",
     "serve": "npx --yes serve -l 5173 .",
-    "lint": "eslint .",
+    "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
+    "format": "prettier --write .",
     "format-check": "prettier --check ."
   },
   "devDependencies": {
@@ -14,6 +21,10 @@
     "globals": "^17.14.0",
     "jsdom": "^25.0.1",
     "prettier": "^3.10.1",
+    "vite": "^8.3.8",
     "vitest": "^5.1.2"
+  },
+  "dependencies": {
+    "@atproto/lexicon": "^0.7.22"
   }
 }
