@@ -213,11 +213,22 @@ export function renderEventSections(events, state) {
   );
 }
 
+/** Multiplier of the 31-based string hash (as in Java's String.hashCode). */
+const HASH_MULTIPLIER = 31;
+/** Radix of the id text: digits plus lowercase letters. */
+const HASH_ID_RADIX = 36;
+
+/**
+ * Short, stable id for a string (used to build unique element ids from event URIs).
+ * Math.imul keeps the running hash a 32-bit integer, so it never loses precision.
+ * @param {string} text
+ * @returns {string} unsigned base-36 hash of `text`
+ */
 function hashId(text) {
   let hash = 0;
   for (let index = 0; index < text.length; index++)
-    hash = (hash * 31 + text.charCodeAt(index)) | 0;
-  return (hash >>> 0).toString(36);
+    hash = Math.imul(hash, HASH_MULTIPLIER) + text.charCodeAt(index);
+  return (hash >>> 0).toString(HASH_ID_RADIX);
 }
 
 /**

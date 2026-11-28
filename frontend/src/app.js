@@ -21,6 +21,7 @@ import { createStore } from "./store.js";
 import { createSubscriptionController } from "./subscriptionController.js";
 import { createSubscriptions } from "./subscriptions.js";
 import { createToaster } from "./toast.js";
+import { runInBackground } from "./util.js";
 import { createComposeView } from "./views/composeView.js";
 import { createDetailView } from "./views/detailView.js";
 import { createDateFilter } from "./views/dateFilter.js";
@@ -187,7 +188,7 @@ export async function start({ config, mockConfig } = {}) {
     const refetch = ["tags", "group", "searchText", "sort"].some(
       (filterKey) => filterKey in patch,
     );
-    if (refetch) loadEvents();
+    if (refetch) runInBackground(loadEvents(), "Reloading events");
   }
 
   const visibleEvents = () => {
@@ -242,9 +243,13 @@ export async function start({ config, mockConfig } = {}) {
     onSaved: () => {
       toast("Event saved. It can take a few seconds to appear.");
       setTimeout(() => {
-        loadEvents();
-        loadFacets();
-        if (detail.currentUri) detail.open(detail.currentUri);
+        runInBackground(loadEvents(), "Reloading events");
+        runInBackground(loadFacets(), "Reloading tags and groups");
+        if (detail.currentUri)
+          runInBackground(
+            detail.open(detail.currentUri),
+            "Refreshing the event",
+          );
       }, 1500);
     },
     onDeleted: (uri) => {
@@ -283,7 +288,7 @@ export async function start({ config, mockConfig } = {}) {
   const datePicker = createDateFilter(findElement("#event-date-filter"), {
     onChange: (dateFilter) => {
       store.set({ dateFilter });
-      loadEvents();
+      runInBackground(loadEvents(), "Reloading events");
     },
   });
   const listView = createListView(findElement("#list"), {
@@ -305,9 +310,11 @@ export async function start({ config, mockConfig } = {}) {
     findElement("#panel-map").hidden = view !== "list";
     findElement("#panel-detail").hidden = view !== "event";
     findElement("#panel-subscriptions").hidden = view !== "subscriptions";
-    if (view === "event") detail.open(route.uri);
+    if (view === "event")
+      runInBackground(detail.open(route.uri), "Opening the event");
     else detail.close();
-    if (view === "subscriptions") subscriptionsPage.open();
+    if (view === "subscriptions")
+      runInBackground(subscriptionsPage.open(), "Opening My subscriptions");
     else subscriptionsPage.close();
     // The map was hidden; re-show so Leaflet re-measures its container.
     if (view === "list") render();
@@ -331,7 +338,10 @@ export async function start({ config, mockConfig } = {}) {
   async function applyNotification(notification) {
     const { events } = store.get();
     if (detail.currentUri === notification.eventUri)
-      detail.open(notification.eventUri);
+      runInBackground(
+        detail.open(notification.eventUri),
+        "Refreshing the updated event",
+      );
     if (notification.kind === "deleted" || notification.kind === "expired") {
       store.set({
         events: events.filter((event) => event.uri !== notification.eventUri),
@@ -381,9 +391,9 @@ export async function start({ config, mockConfig } = {}) {
       onToggleSubscribe: (event) => subscribing.toggle(event),
       sort: state.filters.sort,
     });
-    map.show(shown);
+    runInBackground(map.show(shown), "Showing events on the map");
     detail.refreshActions();
-    subscriptionsPage.refresh();
+    runInBackground(subscriptionsPage.refresh(), "Refreshing My subscriptions");
   }
 
   function renderAccount() {
@@ -447,7 +457,8 @@ export async function start({ config, mockConfig } = {}) {
 
   store.subscribe(() => render());
   window.addEventListener("online", () => {
-    if (store.get().stale || store.get().error) loadEvents();
+    if (store.get().stale || store.get().error)
+      runInBackground(loadEvents(), "Reloading events");
     notifications.reconnectNow();
   });
 
@@ -460,9 +471,9 @@ export async function start({ config, mockConfig } = {}) {
   }
   renderAccount();
   router.start();
-  loadFacets();
-  loadEvents();
-  subscribing.reload();
+  runInBackground(loadFacets(), "Loading tags and groups");
+  runInBackground(loadEvents(), "Loading events");
+  runInBackground(subscribing.reload(), "Loading subscriptions");
   registerServiceWorker();
 }
 
@@ -530,5 +541,5 @@ if (
   !globalThis.__CM_NO_AUTOSTART__ &&
   document.querySelector("#list")
 ) {
-  start();
+  runInBackground(start(), "Starting the app");
 }

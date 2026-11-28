@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  CARD_ID_PREFIX,
   EMPTY_LIST_MESSAGE,
   NEWEST_SECTION_TITLE,
   createListView,
@@ -305,5 +306,35 @@ describe("createListView", () => {
     root.querySelector(".card__actions button").focus();
     listView.render({ events: [event], subscribed: new Set([event.uri]), now });
     expect(document.activeElement.textContent).toBe(SUBSCRIBED_LABEL);
+  });
+});
+
+/**
+ * The card title id hash before it switched to Math.imul, kept here as the reference
+ * so the ids (used by aria-labelledby) are proven unchanged.
+ * @param {string} text
+ * @returns {string}
+ */
+function legacyHashId(text) {
+  let hash = 0;
+  for (let index = 0; index < text.length; index++)
+    hash = (hash * 31 + text.charCodeAt(index)) | 0;
+  return (hash >>> 0).toString(36);
+}
+
+describe("renderCard title ids", () => {
+  it("are unchanged from the original hash, including for long URIs", () => {
+    const uris = [
+      "",
+      "at://did:plc:abc/app.communitymap.event/3kabc",
+      `ical://${"f".repeat(12)}/${"e".repeat(16)}`,
+      `at://did:plc:${"x".repeat(5000)}/app.communitymap.event/${"\u00e9".repeat(50)}`,
+    ];
+    for (const uri of uris) {
+      const card = renderCard(sampleEvent({ uri }));
+      const titleId = card.querySelector("h3").id;
+      expect(titleId).toBe(`${CARD_ID_PREFIX}-${legacyHashId(uri)}`);
+      expect(card.getAttribute("aria-labelledby")).toBe(titleId);
+    }
   });
 });

@@ -21,19 +21,50 @@ export function debounce(callback, delayMs) {
 }
 
 /**
- * Random lowercase base32-ish id (uses crypto when available).
- * @param {number} [length=16]
+ * Random lowercase base32 id from the Web Crypto CSPRNG (crypto.getRandomValues).
+ * @param {number} [length=16] number of characters; a positive integer
  * @returns {string}
+ * @throws {RangeError} when `length` is not a positive integer
+ * @throws {Error} when crypto.getRandomValues is unavailable
  */
 export function randomId(length = 16) {
   const alphabet = "abcdefghijklmnopqrstuvwxyz234567";
-  const bytes = new Uint8Array(length);
-  if (globalThis.crypto?.getRandomValues)
-    globalThis.crypto.getRandomValues(bytes);
-  else
-    for (let index = 0; index < length; index++)
-      bytes[index] = Math.floor(Math.random() * 256);
-  return Array.from(bytes, (randomByte) => alphabet[randomByte % 32]).join("");
+  if (!Number.isInteger(length) || length < 1)
+    throw new RangeError(
+      `randomId length must be a positive integer, got ${length}`,
+    );
+  // Only the Web Crypto CSPRNG is used: Math.random() is predictable, and these ids
+  // name records and subscribers. Every supported browser (and Node 19+) has it.
+  if (typeof globalThis.crypto?.getRandomValues !== "function")
+    throw new Error(
+      "randomId needs crypto.getRandomValues, which is unavailable",
+    );
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(length));
+  // 256 is a multiple of 32, so `% 32` picks every character with equal probability.
+  return Array.from(
+    bytes,
+    (randomByte) => alphabet[randomByte % alphabet.length],
+  ).join("");
+}
+
+/**
+ * Start an async task without waiting for it ("fire and forget"), and log it if it
+ * fails, so a rejection is never silently dropped. Use for work whose result the
+ * caller does not need, such as refreshing data in the background.
+ * @param {Promise<unknown>|unknown} task the promise (or value) the task returned
+ * @param {string} description what the task does, for the log, e.g. "Loading events"
+ * @param {{logError?: (message: string, error: unknown) => void}} [options]
+ *   logError defaults to console.error (tests pass a spy)
+ * @returns {void}
+ */
+export function runInBackground(
+  task,
+  description,
+  { logError = console.error } = {},
+) {
+  Promise.resolve(task).catch((error) =>
+    logError(`${description} failed:`, error),
+  );
 }
 
 /**

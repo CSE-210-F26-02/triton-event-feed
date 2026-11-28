@@ -3,26 +3,22 @@ name = "triton-event-feed-backend"
 version = "0.1.0"
 description = "Backend for the Triton Event Feed application."
 readme = "README.md"
-# 3.11 is the floor because the Dockerfile and ci.yml both run Python 3.11;
-# backend.yml runs 3.12, which this range also covers.
-requires-python = ">=3.11"
+# ci.yml, backend.yml and the Dockerfile all run Python 3.12.
+requires-python = ">=3.12"
 dependencies = [
   "dotenv>=0.9.9",
   "fastapi==0.163.1",
-  "regex>=2026.11.25",
-  "uvicorn[standard]==0.54.0",
-  "pydantic==2.14.3",
-  "pydantic-settings==2.16.2",
-  "websockets==17.4",
   "httpx==0.28.1",
   "icalendar==7.3.0",
+  "pydantic==2.14.3",
+  "pydantic-settings==2.16.2",
+  "regex>=2026.11.25",
+  "uvicorn[standard]==0.54.0",
+  "websockets==17.4",
 ]
 
-# ci.yml installs these with `pip install -e ".[dev]"`; the uv dev group below
-# lists the same packages for `uv sync`. Keep the two lists in step.
-[project.optional-dependencies]
-dev = ["pytest==9.2.0", "pytest-asyncio==1.4.1.post1", "ruff==0.17.4"]
-
+# Dev tools for `uv sync`. CI installs them from requirements-dev.lock, which is
+# exported from uv.lock (see the comment in .github/workflows/ci.yml).
 [dependency-groups]
 dev = ["pytest==9.2.0", "pytest-asyncio==1.4.1.post1", "ruff==0.17.4"]
 
@@ -35,16 +31,16 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.black]
-# Match flake8's default 79-character limit (CI runs both). With the same
-# limit, black wraps long lines in parentheses itself, so names never have
+# Match flake8's 79-character limit (backend/.flake8; CI runs both). With the
+# same limit, black wraps long lines in parentheses itself, so names never have
 # to be shortened to fit.
 line-length = 79
-target-version = ["py311"]
+target-version = ["py312"]
 
 [tool.ruff]
 # Same 79-character limit as black and flake8 so all three agree.
 line-length = 79
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
@@ -54,4 +50,4 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["app*"]
+include = ["app*", "lexicon*"]

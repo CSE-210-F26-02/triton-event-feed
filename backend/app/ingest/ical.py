@@ -26,8 +26,18 @@ DEFAULT_DURATION = timedelta(hours=1)
 NO_LOCATION = "TBA"
 
 
-def _sha1(s: str) -> str:
-    return hashlib.sha1(s.encode()).hexdigest()
+def _sha1(text: str) -> str:
+    """Return the SHA-1 hex digest of ``text``, used only to build stable ids.
+
+    The digest is not a security control: it only turns a feed URL / UID into a
+    short, deterministic URI segment. SHA-1 is kept (rather than switching to
+    SHA-256) because existing ``ical://`` URIs are stored in the index and in
+    subscriptions, and a different digest would orphan them.
+
+    :param text: the feed URL or iCalendar UID to fingerprint.
+    :returns: the 40-character lowercase hex digest.
+    """
+    return hashlib.sha1(text.encode(), usedforsecurity=False).hexdigest()
 
 
 def event_uri(feed_url: str, uid: str) -> str:

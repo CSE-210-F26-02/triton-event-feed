@@ -433,13 +433,22 @@ def _purge(c: sqlite3.Connection, uris: list[str]) -> None:
 
 
 def _row_to_event(row: sqlite3.Row) -> IndexedEvent:
+    """Build an IndexedEvent from an ``events`` table row.
+
+    The row is copied into a dict first so columns are read by name through a
+    mapping (``sqlite3.Row`` is also a sequence, which only takes int indices).
+
+    :param row: a row selected from the ``events`` table.
+    :returns: the indexed event, with its record validated against the model.
+    """
+    columns = dict(row)
     return IndexedEvent(
-        uri=row["uri"],
-        cid=row["cid"],
-        author_did=row["author_did"],
-        author_handle=row["author_handle"],
-        source=row["source"],
-        record=EventRecord.model_validate(json.loads(row["record"])),
-        indexed_at=from_iso(row["indexed_at"]),
-        updated_at=from_iso(row["updated_at"]),
+        uri=columns["uri"],
+        cid=columns["cid"],
+        author_did=columns["author_did"],
+        author_handle=columns["author_handle"],
+        source=columns["source"],
+        record=EventRecord.model_validate(json.loads(columns["record"])),
+        indexed_at=from_iso(columns["indexed_at"]),
+        updated_at=from_iso(columns["updated_at"]),
     )

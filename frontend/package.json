@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "description": "frontend for triton-event-feed",
   "main": "script.js",
+  "private": true,
+  "type": "module",
   "scripts": {
     "dev": "vite",
     "test": "vitest run",
