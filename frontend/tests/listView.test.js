@@ -42,14 +42,15 @@ describe("renderCard", () => {
     const badges = [...card.querySelectorAll(".badge")].map(
       (b) => b.textContent,
     );
-    expect(badges).toEqual(["Ending soon", "Updated"]);
+    // An event that is ending soon is still happening, so it gets both badges.
+    expect(badges).toEqual(["Happening now", "Ending soon", "Updated"]);
     expect(card.querySelector(".btn").getAttribute("aria-pressed")).toBe(
       "true",
     );
     expect(
       renderCard(sampleEvent({ status: "live" })).querySelector(".badge")
         .textContent,
-    ).toBe("Live");
+    ).toBe("Happening now");
   });
 
   it("escapes user content", () => {
@@ -165,5 +166,36 @@ describe("createListView", () => {
     root.querySelector(".card__actions button").focus();
     v.render({ events: [e], subscribed: new Set([e.uri]), now });
     expect(document.activeElement.textContent).toBe("Subscribed");
+  });
+});
+
+/**
+ * The card title id hash before it switched to Math.imul, kept here as the reference
+ * so the ids (used by aria-labelledby) are proven unchanged.
+ * @param {string} text
+ * @returns {string}
+ */
+function legacyHashId(text) {
+  let hash = 0;
+  for (let index = 0; index < text.length; index++)
+    hash = (hash * 31 + text.charCodeAt(index)) | 0;
+  return (hash >>> 0).toString(36);
+}
+
+describe("renderCard title ids", () => {
+  it("are unchanged from the original hash, including for long URIs", () => {
+    const uris = [
+      "",
+      "at://did:plc:abc/app.communitymap.event/3kabc",
+      `ical://${"f".repeat(12)}/${"e".repeat(16)}`,
+      `at://did:plc:${"x".repeat(5000)}/app.communitymap.event/${"\u00e9".repeat(50)}`,
+    ];
+    for (const uri of uris) {
+      const card = renderCard(sampleEvent({ uri }));
+      expect(card.querySelector("h3").id).toBe(`ev-${legacyHashId(uri)}`);
+      expect(card.getAttribute("aria-labelledby")).toBe(
+        card.querySelector("h3").id,
+      );
+    }
   });
 });

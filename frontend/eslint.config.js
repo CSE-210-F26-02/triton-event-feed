@@ -9,4 +9,9 @@ export default defineConfig([
     extends: ["js/recommended"],
     languageOptions: { globals: globals.browser },
   },
+  {
+    // Tests run under Node (vitest), so Node globals such as __dirname exist there.
+    files: ["tests/**/*.js"],
+    languageOptions: { globals: { ...globals.browser, ...globals.node } },
+  },
 ]);

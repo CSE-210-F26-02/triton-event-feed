@@ -16,6 +16,7 @@ import { createGeo } from "./geo.js";
 import { createStore } from "./store.js";
 import { createSubscriptions } from "./subscriptions.js";
 import { createToaster } from "./toast.js";
+import { runInBackground } from "./util.js";
 import { createComposeView } from "./views/composeView.js";
 import { createDetailView } from "./views/detailView.js";
 import { createFilterBar } from "./views/filterBar.js";
@@ -122,7 +123,7 @@ export async function start({
     if (!filters.nearMe) geo.clear();
     store.set({ filters });
     const refetch = ["tags", "group", "q", "sort"].some((k) => k in patch);
-    if (refetch) loadEvents();
+    if (refetch) runInBackground(loadEvents(), "Reloading events");
   }
 
   const visibleEvents = () => {
@@ -154,8 +155,8 @@ export async function start({
     onSaved: () => {
       toast("Event saved. It can take a few seconds to appear.");
       setTimeout(() => {
-        loadEvents();
-        loadFacets();
+        runInBackground(loadEvents(), "Reloading events");
+        runInBackground(loadFacets(), "Reloading tags and groups");
       }, 1500);
     },
     onDeleted: (uri) => {
@@ -230,7 +231,7 @@ export async function start({
       onToggleSubscribe: toggleSubscribe,
       sort: s.filters.sort,
     });
-    if (s.tab === "map") map.show(shown);
+    if (s.tab === "map") runInBackground(map.show(shown), "Showing the map");
   }
 
   function renderAccount() {
@@ -292,7 +293,8 @@ export async function start({
     render();
   });
   window.addEventListener("online", () => {
-    if (store.get().stale || store.get().error) loadEvents();
+    if (store.get().stale || store.get().error)
+      runInBackground(loadEvents(), "Reloading events");
     subs.reconnectNow();
   });
 
@@ -304,11 +306,12 @@ export async function start({
     /* offline with nothing cached: read-only */
   }
   renderAccount();
-  loadFacets();
-  loadEvents();
-  subs.load();
+  runInBackground(loadFacets(), "Loading tags and groups");
+  runInBackground(loadEvents(), "Loading events");
+  runInBackground(subs.load(), "Loading subscriptions");
   const directUri = new URLSearchParams(window.location.search).get("event");
-  if (directUri) detail.open(directUri);
+  if (directUri)
+    runInBackground(detail.open(directUri), "Opening the linked event");
   registerServiceWorker();
 }
 
@@ -352,5 +355,5 @@ if (
   !globalThis.__CM_NO_AUTOSTART__ &&
   document.querySelector("#list")
 ) {
-  start();
+  runInBackground(start(), "Starting the app");
 }

@@ -126,10 +126,22 @@ export function renderCard(ev, opts = {}) {
   );
 }
 
-function hashId(s) {
-  let x = 0;
-  for (let i = 0; i < s.length; i++) x = (x * 31 + s.charCodeAt(i)) | 0;
-  return (x >>> 0).toString(36);
+/** Multiplier of the 31-based string hash (as in Java's String.hashCode). */
+const HASH_MULTIPLIER = 31;
+/** Radix of the id text: digits plus lowercase letters. */
+const HASH_ID_RADIX = 36;
+
+/**
+ * Short, stable id for a string (used to build unique element ids from event URIs).
+ * Math.imul keeps the running hash a 32-bit integer, so it never loses precision.
+ * @param {string} text
+ * @returns {string} unsigned base-36 hash of `text`
+ */
+function hashId(text) {
+  let hash = 0;
+  for (let index = 0; index < text.length; index++)
+    hash = Math.imul(hash, HASH_MULTIPLIER) + text.charCodeAt(index);
+  return (hash >>> 0).toString(HASH_ID_RADIX);
 }
 
 /**

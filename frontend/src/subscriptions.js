@@ -2,7 +2,13 @@
  * Anonymous event subscriptions + live notifications (SSE with reconnect and catch-up).
  * @module subscriptions
  */
-import { getStorage, randomId, storageGet, storageSet } from "./util.js";
+import {
+  getStorage,
+  randomId,
+  runInBackground,
+  storageGet,
+  storageSet,
+} from "./util.js";
 
 const ID_KEY = "cm:subscriber-id";
 const LAST_KEY = "cm:last-notification-id";
@@ -74,7 +80,7 @@ export function createSubscriptions({
   let timer = null;
 
   function parseLast(v) {
-    const n = v == null ? NaN : Number(v);
+    const n = v == null ? Number.NaN : Number(v);
     return Number.isFinite(n) ? n : null;
   }
 
@@ -125,7 +131,7 @@ export function createSubscriptions({
     source = new EventSourceImpl(api.notificationStreamUrl(subscriberId));
     source.onopen = () => {
       attempts = 0;
-      catchUp();
+      runInBackground(catchUp(), "Catching up on notifications");
     };
     source.onmessage = (ev) => {
       try {
@@ -194,7 +200,10 @@ export function createSubscriptions({
       } else {
         await api.subscribe(subscriberId, uri);
         subscribed.add(uri);
-        askPermissionOnce();
+        runInBackground(
+          askPermissionOnce(),
+          "Asking for notification permission",
+        );
       }
       changed();
       return subscribed.has(uri);

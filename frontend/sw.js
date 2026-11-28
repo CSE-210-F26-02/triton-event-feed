@@ -3,7 +3,7 @@
  * - GET /api/*: network-first, falling back to the cached copy (marked with x-cm-stale: 1).
  * - Never cached: non-GET requests and the SSE notification stream.
  */
-const VERSION = "v2";
+const VERSION = "v3";
 const SHELL_CACHE = `cm-shell-${VERSION}`;
 const API_CACHE = `cm-api-${VERSION}`;
 const SHELL = [
@@ -78,7 +78,7 @@ async function networkFirst(req) {
   const cache = await caches.open(API_CACHE);
   try {
     const res = await fetch(req);
-    if (res.ok) cache.put(req, res.clone());
+    if (res.ok) putInCacheBestEffort(API_CACHE, req, res.clone());
     return res;
   } catch (err) {
     const hit = await cache.match(req);
@@ -97,6 +97,21 @@ async function cacheFirst(req) {
   const hit = await caches.match(req, { ignoreSearch: true });
   if (hit) return hit;
   const res = await fetch(req);
-  if (res.ok) (await caches.open(SHELL_CACHE)).put(req, res.clone());
+  if (res.ok) putInCacheBestEffort(SHELL_CACHE, req, res.clone());
   return res;
+}
+
+/**
+ * Save a response copy without delaying the response itself. Caching is best-effort:
+ * a failed write (e.g. storage quota exceeded) is logged and must never fail the fetch.
+ * @param {string} cacheName e.g. API_CACHE or SHELL_CACHE
+ * @param {Request} req
+ * @param {Response} res a clone the cache may consume
+ * @returns {void}
+ */
+function putInCacheBestEffort(cacheName, req, res) {
+  caches
+    .open(cacheName)
+    .then((cache) => cache.put(req, res))
+    .catch((error) => console.warn(`Could not cache ${req.url}:`, error));
 }

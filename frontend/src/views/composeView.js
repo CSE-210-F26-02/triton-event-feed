@@ -9,6 +9,7 @@ import {
   validateEventRecord,
   validateHashtag,
 } from "../records.js";
+import { runInBackground } from "../util.js";
 
 /**
  * ISO timestamp → value for <input type="datetime-local"> in local time.
@@ -270,7 +271,7 @@ export function createComposeView({
     const status = form.querySelector(".form-status");
     form.addEventListener("submit", (e) => {
       e.preventDefault();
-      submit(form, ev, status);
+      runInBackground(submit(form, ev, status), "Saving the event");
     });
     form.querySelector("[data-action=cancel]").onclick = () =>
       closeDialog(dialog);

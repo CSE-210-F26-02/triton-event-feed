@@ -147,3 +147,22 @@ async def test_run_ical_loop_survives_errors() -> None:
 
 async def test_run_ical_loop_no_feeds_returns() -> None:
     await run_ical_loop(FakeStore(), FakeNotifier(), Settings(ical_feeds=""))
+
+
+def test_event_uri_is_stable_across_releases():
+    """ical:// URIs are stored in the index and in subscriptions, so the id
+    scheme (SHA-1 of feed URL and UID, truncated) must never change."""
+    assert (
+        event_uri("https://example.edu/feed.ics", "taco@example.edu")
+        == "ical://3a82db44c199/64bc2861bbf3dc7d"
+    )
+
+
+def test_event_uri_differs_per_feed_and_uid():
+    """The same UID in two feeds, or two UIDs in one feed, get distinct URIs."""
+    uris = {
+        event_uri("https://a.example/x.ics", "1@a"),
+        event_uri("https://b.example/x.ics", "1@a"),
+        event_uri("https://a.example/x.ics", "2@a"),
+    }
+    assert len(uris) == 3
