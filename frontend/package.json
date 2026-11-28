@@ -20,10 +20,14 @@
     "globals": "^17.14.0",
     "jsdom": "^29.1.1",
     "prettier": "^3.10.1",
-    "vite": "^8.3.8",
-    "vitest": "^5.1.2"
+    "vite": "^8.3.8"
   },
   "dependencies": {
-    "@atproto/lexicon": "^0.7.22"
+    "@atproto/api": "^0.32.7",
+    "@atproto/lex-client": "^0.7.1",
+    "@atproto/lex-password-session": "^0.3.8",
+    "@atproto/lexicon": "^0.7.22",
+    "@atproto/oauth-client": "^0.9.8",
+    "@atproto/oauth-client-browser": "^0.5.19"
   }
 }
