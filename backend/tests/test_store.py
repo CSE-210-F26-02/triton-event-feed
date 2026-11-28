@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.models import (
+from models import (
     BoundingBox,
     Count,
     EventQuery,
@@ -12,66 +12,85 @@ from app.models import (
     Location,
     Notification,
 )
-from app.seed import seed
-from app.store.sqlite import SqliteStore, to_iso
+from seed import seed
+from store.sqlite import SqliteStore, to_iso
 
 
 def uris(page):
-    return [e.uri.rsplit("/", 1)[1] for e in page.events]
+    return [event.uri.rsplit("/", 1)[1] for event in page.events]
 
 
 def test_upsert_created_updated_unchanged(store, make_event):
-    ev = make_event()
-    assert store.upsert_event(ev) == "created"
-    assert store.upsert_event(ev) == "unchanged"
-    assert store.upsert_event(ev.model_copy(update={"cid": "bafy2"})) == "updated"
+    event = make_event()
+    assert store.upsert_event(event) == "created"
+    assert store.upsert_event(event) == "unchanged"
+    assert (
+        store.upsert_event(event.model_copy(update={"cid": "bafy2"}))
+        == "updated"
+    )
     changed = make_event(name="Renamed", cid="bafy2")
     assert store.upsert_event(changed) == "updated"
-    assert store.get_event(ev.uri).record.name == "Renamed"
+    assert store.get_event(event.uri).record.name == "Renamed"
 
 
 def test_update_keeps_original_indexed_at(store, make_event, now):
     store.upsert_event(make_event())
-    later = make_event(name="New", cid="bafy2", indexed_at=now + timedelta(hours=1))
+    later = make_event(
+        name="New", cid="bafy2", indexed_at=now + timedelta(hours=1)
+    )
     store.upsert_event(later)
     assert store.get_event(later.uri).indexed_at == now
 
 
 def test_get_event_roundtrip(store, make_event):
-    ev = make_event(tags=["food"], group="ACM", author_handle="a.bsky.social")
-    store.upsert_event(ev)
-    assert store.get_event(ev.uri) == ev
+    event = make_event(
+        tags=["food"], group="ACM", author_handle="a.bsky.social"
+    )
+    store.upsert_event(event)
+    assert store.get_event(event.uri) == event
     assert store.get_event("at://nope") is None
 
 
 def test_delete_event(store, make_event):
-    ev = make_event(tags=["food"])
-    store.upsert_event(ev)
-    store.subscribe("subscriber1", ev.uri)
-    assert store.delete_event(ev.uri) is True
-    assert store.subscribers_of(ev.uri) == []
-    assert store.delete_event(ev.uri) is False
-    assert store.get_event(ev.uri) is None
+    event = make_event(tags=["food"])
+    store.upsert_event(event)
+    store.subscribe("subscriber1", event.uri)
+    assert store.delete_event(event.uri) is True
+    assert store.subscribers_of(event.uri) == []
+    assert store.delete_event(event.uri) is False
+    assert store.get_event(event.uri) is None
     assert store.list_tags(datetime.now(UTC)) == []
 
 
 def test_query_hides_expired_and_orders(store, make_event, now):
-    store.upsert_event(make_event("b", start_h=2, end_h=3))
-    store.upsert_event(make_event("a", start_h=2, end_h=3))
-    store.upsert_event(make_event("c", start_h=-1, end_h=1))
-    store.upsert_event(make_event("old", start_h=-3, end_h=-2))
+    store.upsert_event(make_event("b", start_in_hours=2, end_in_hours=3))
+    store.upsert_event(make_event("a", start_in_hours=2, end_in_hours=3))
+    store.upsert_event(make_event("c", start_in_hours=-1, end_in_hours=1))
+    store.upsert_event(make_event("old", start_in_hours=-3, end_in_hours=-2))
     assert uris(store.query_events(EventQuery(), now)) == ["c", "a", "b"]
-    q = EventQuery(ends_after=now - timedelta(hours=5))
-    assert uris(store.query_events(q, now)) == ["old", "c", "a", "b"]
+    query = EventQuery(ends_after=now - timedelta(hours=5))
+    assert uris(store.query_events(query, now)) == ["old", "c", "a", "b"]
 
 
 def test_query_filters(store, make_event, now):
-    store.upsert_event(make_event("1", tags=["food", "free"], group="ACM", name="Pizza Night"))
-    store.upsert_event(make_event("2", tags=["music"], description="Live JAZZ band"))
     store.upsert_event(
-        make_event("3", tags=["tech"], location="Geisel Library", start_h=10, end_h=11)
+        make_event("1", tags=["food", "free"], group="ACM", name="Pizza Night")
     )
-    assert uris(store.query_events(EventQuery(tags=["music", "free"]), now)) == ["1", "2"]
+    store.upsert_event(
+        make_event("2", tags=["music"], description="Live JAZZ band")
+    )
+    store.upsert_event(
+        make_event(
+            "3",
+            tags=["tech"],
+            location="Geisel Library",
+            start_in_hours=10,
+            end_in_hours=11,
+        )
+    )
+    assert uris(
+        store.query_events(EventQuery(tags=["music", "free"]), now)
+    ) == ["1", "2"]
     assert uris(store.query_events(EventQuery(tags=["#Food"]), now)) == ["1"]
     assert uris(store.query_events(EventQuery(group="ACM"), now)) == ["1"]
     assert uris(store.query_events(EventQuery(group="acm"), now)) == []
@@ -83,16 +102,20 @@ def test_query_filters(store, make_event, now):
 
 
 def test_query_pagination(store, make_event, now):
-    for i in range(5):
-        store.upsert_event(make_event(f"e{i}", start_h=1 + i // 2, end_h=10))
+    for index in range(5):
+        store.upsert_event(
+            make_event(
+                f"e{index}", start_in_hours=1 + index // 2, end_in_hours=10
+            )
+        )
     seen: list[str] = []
-    q = EventQuery(limit=2)
+    query = EventQuery(limit=2)
     while True:
-        page = store.query_events(q, now)
+        page = store.query_events(query, now)
         seen += uris(page)
         if page.cursor is None:
             break
-        q = q.model_copy(update={"cursor": page.cursor})
+        query = query.model_copy(update={"cursor": page.cursor})
     assert seen == ["e0", "e1", "e2", "e3", "e4"]
 
 
@@ -110,15 +133,15 @@ def test_query_bad_cursor(store, now):
 
 
 def test_naive_datetimes_are_utc(store, make_event, now):
-    store.upsert_event(make_event("a", start_h=-1, end_h=1))
+    store.upsert_event(make_event("a", start_in_hours=-1, end_in_hours=1))
     naive_now = now.astimezone(UTC).replace(tzinfo=None)
     assert uris(store.query_events(EventQuery(), naive_now)) == ["a"]
     assert to_iso(naive_now) == to_iso(now)
 
 
 def test_delete_expired_cascades(store, make_event, now):
-    old = make_event("old", start_h=-3, end_h=-1, tags=["food"])
-    live = make_event("live", start_h=-1, end_h=1, tags=["food"])
+    old = make_event("old", start_in_hours=-3, end_in_hours=-1, tags=["food"])
+    live = make_event("live", start_in_hours=-1, end_in_hours=1, tags=["food"])
     store.upsert_event(old)
     store.upsert_event(live)
     store.subscribe("subscriber1", old.uri)
@@ -128,38 +151,59 @@ def test_delete_expired_cascades(store, make_event, now):
     assert store.get_event(old.uri) is None
     assert store.list_updates(old.uri) == []
     assert store.subscriptions_of("subscriber1") == [live.uri]
-    assert store.list_tags(now - timedelta(hours=5)) == [Count(value="food", count=1)]
+    assert store.list_tags(now - timedelta(hours=5)) == [
+        Count(value="food", count=1)
+    ]
 
 
 def test_list_tags_and_groups(store, make_event, now):
     store.upsert_event(make_event("1", tags=["food", "free"], group="ACM"))
     store.upsert_event(make_event("2", tags=["free", "music"], group="KSDT"))
     store.upsert_event(make_event("3", tags=["free"], group="ACM"))
-    store.upsert_event(make_event("x", tags=["zzz"], group="Gone", start_h=-3, end_h=-2))
+    store.upsert_event(
+        make_event(
+            "x", tags=["zzz"], group="Gone", start_in_hours=-3, end_in_hours=-2
+        )
+    )
     assert store.list_tags(now) == [
         Count(value="free", count=3),
         Count(value="food", count=1),
         Count(value="music", count=1),
     ]
-    assert store.list_groups(now) == [Count(value="ACM", count=2), Count(value="KSDT", count=1)]
+    assert store.list_groups(now) == [
+        Count(value="ACM", count=2),
+        Count(value="KSDT", count=1),
+    ]
 
 
 def test_updates(store, now):
-    store.add_update(EventUpdate(event_uri="u", text="2nd", created_at=now + timedelta(1)))
-    store.add_update(EventUpdate(event_uri="u", text="1st", source_uri="at://p", created_at=now))
-    got = store.list_updates("u")
-    assert [u.text for u in got] == ["1st", "2nd"]
-    assert got[0].source_uri == "at://p"
-    assert got[0].created_at == now
+    store.add_update(
+        EventUpdate(event_uri="u", text="2nd", created_at=now + timedelta(1))
+    )
+    store.add_update(
+        EventUpdate(
+            event_uri="u", text="1st", source_uri="at://p", created_at=now
+        )
+    )
+    stored = store.list_updates("u")
+    assert [update.text for update in stored] == ["1st", "2nd"]
+    assert stored[0].source_uri == "at://p"
+    assert stored[0].created_at == now
 
 
 def test_listeners(store, now):
-    rec = ListenerRecord(subject="at://did:a/x/1", hashtag="#Party", created_at=now)
-    store.upsert_listener(Listener(uri="at://did:a/l/1", author_did="did:a", record=rec))
-    store.upsert_listener(Listener(uri="at://did:b/l/1", author_did="did:b", record=rec))
+    record = ListenerRecord(
+        subject="at://did:a/x/1", hashtag="#Party", created_at=now
+    )
+    store.upsert_listener(
+        Listener(uri="at://did:a/l/1", author_did="did:a", record=record)
+    )
+    store.upsert_listener(
+        Listener(uri="at://did:b/l/1", author_did="did:b", record=record)
+    )
     assert store.listener_dids() == ["did:a", "did:b"]
-    [got] = store.listeners_for_did("did:a")
-    assert got.record.hashtag == "party"
+    [stored] = store.listeners_for_did("did:a")
+    assert stored.record.hashtag == "party"
     assert store.delete_listener("at://did:a/l/1") is True
     assert store.delete_listener("at://did:a/l/1") is False
     assert store.listener_dids() == ["did:b"]
@@ -177,17 +221,29 @@ def test_subscriptions(store):
 
 
 def test_notifications(store, now):
-    def make(sub: str) -> Notification:
+    def make_notification(subscriber_id: str) -> Notification:
         return Notification(
-            subscriber_id=sub, event_uri="at://e", kind="updated", message="m", created_at=now
+            subscriber_id=subscriber_id,
+            event_uri="at://e",
+            kind="updated",
+            message="m",
+            created_at=now,
         )
 
-    a1 = store.add_notification(make("a"))
-    store.add_notification(make("b"))
-    a2 = store.add_notification(make("a"))
-    assert a1.id is not None and a2.id > a1.id
-    assert store.list_notifications("a") == [a1, a2]
-    assert store.list_notifications("a", since_id=a1.id) == [a2]
+    first_notification = store.add_notification(make_notification("a"))
+    store.add_notification(make_notification("b"))
+    second_notification = store.add_notification(make_notification("a"))
+    assert (
+        first_notification.id is not None
+        and second_notification.id > first_notification.id
+    )
+    assert store.list_notifications("a") == [
+        first_notification,
+        second_notification,
+    ]
+    assert store.list_notifications("a", since_id=first_notification.id) == [
+        second_notification
+    ]
 
 
 def test_cursors(store):
@@ -199,57 +255,74 @@ def test_cursors(store):
 
 def test_file_store_persists(tmp_path, make_event):
     path = str(tmp_path / "sub" / "db.sqlite")
-    s = SqliteStore(path)
-    s.upsert_event(make_event())
-    s.close()
-    s2 = SqliteStore(path)
-    assert s2.get_event(make_event().uri) is not None
-    s2.close()
+    first_store = SqliteStore(path)
+    first_store.upsert_event(make_event())
+    first_store.close()
+    reopened_store = SqliteStore(path)
+    assert reopened_store.get_event(make_event().uri) is not None
+    reopened_store.close()
 
 
 def test_seed(store, now):
     assert seed(store, now) == 12
     page = store.query_events(EventQuery(limit=100), now)
     assert len(page.events) == 12
-    live = [e for e in page.events if e.record.starts_at <= now <= e.record.ends_at]
+    live = [
+        event
+        for event in page.events
+        if event.record.starts_at <= now <= event.record.ends_at
+    ]
     assert len(live) >= 2
-    assert any(e.record.ends_at - now <= timedelta(hours=1) for e in live)
-    assert all(e.record.starts_at < now + timedelta(days=7) for e in page.events)
+    assert any(
+        event.record.ends_at - now <= timedelta(hours=1) for event in live
+    )
+    assert all(
+        event.record.starts_at < now + timedelta(days=7)
+        for event in page.events
+    )
 
 
 def test_query_sort_newest_and_pagination(store, make_event, now):
-    for i in range(5):
-        ev = make_event(f"e{i}", start_h=10 - i, end_h=20)
-        rec = ev.record.model_copy(update={"created_at": now + timedelta(minutes=i)})
-        store.upsert_event(ev.model_copy(update={"record": rec}))
+    for index in range(5):
+        event = make_event(
+            f"e{index}", start_in_hours=10 - index, end_in_hours=20
+        )
+        record = event.record.model_copy(
+            update={"created_at": now + timedelta(minutes=index)}
+        )
+        store.upsert_event(event.model_copy(update={"record": record}))
 
     seen: list[str] = []
-    q = EventQuery(sort="newest", limit=2)
+    query = EventQuery(sort="newest", limit=2)
     while True:
-        page = store.query_events(q, now)
+        page = store.query_events(query, now)
         seen += uris(page)
         if page.cursor is None:
             break
-        q = q.model_copy(update={"cursor": page.cursor})
+        query = query.model_copy(update={"cursor": page.cursor})
     assert seen == ["e4", "e3", "e2", "e1", "e0"]
 
     # Cursor from one sort mode is rejected for the other
-    p = store.query_events(EventQuery(sort="soonest", limit=1), now)
+    first_page = store.query_events(EventQuery(sort="soonest", limit=1), now)
     with pytest.raises(ValueError):
-        store.query_events(EventQuery(sort="newest", cursor=p.cursor), now)
+        store.query_events(
+            EventQuery(sort="newest", cursor=first_page.cursor), now
+        )
 
 
 def test_query_bbox_and_antimeridian(store, make_event, now):
-    def at_pos(rkey: str, lat: str | None, lng: str | None):
-        ev = make_event(rkey)
-        rec = ev.record.model_copy(update={"location": Location(name=rkey, lat=lat, lng=lng)})
-        store.upsert_event(ev.model_copy(update={"record": rec}))
+    def store_event_at(rkey: str, lat: str | None, lng: str | None):
+        event = make_event(rkey)
+        record = event.record.model_copy(
+            update={"location": Location(name=rkey, lat=lat, lng=lng)}
+        )
+        store.upsert_event(event.model_copy(update={"record": record}))
 
-    at_pos("ucsd", "32.88", "-117.24")
-    at_pos("downtown", "32.71", "-117.16")
-    at_pos("nocoords", None, None)
-    at_pos("fiji_e", "-18.0", "178.0")
-    at_pos("fiji_w", "-18.0", "-178.0")
+    store_event_at("ucsd", "32.88", "-117.24")
+    store_event_at("downtown", "32.71", "-117.16")
+    store_event_at("nocoords", None, None)
+    store_event_at("fiji_e", "-18.0", "178.0")
+    store_event_at("fiji_w", "-18.0", "-178.0")
 
     campus = BoundingBox(west=-117.26, south=32.86, east=-117.22, north=32.90)
     assert uris(store.query_events(EventQuery(bbox=campus), now)) == ["ucsd"]

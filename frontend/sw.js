@@ -1,9 +1,17 @@
 /* Community Map service worker (classic script).
- * - App shell: cache-first; local previews fetch current files with an offline fallback.
+ * - Pages (navigations): network-first, so a new deploy shows up on the next load;
+ *   the cached page is the offline fallback.
+ * - Other app files: cache-first (built files have content-hashed names, so a
+ *   cached copy is never out of date); local previews always fetch current files.
  * - GET /api/*: network-first, falling back to the cached copy (marked with x-cm-stale: 1).
  * - Never cached: non-GET requests and the SSE notification stream.
+ *
+ * `vite build` replaces VERSION and SHELL below (build/serviceWorkerBuild.js):
+ * VERSION becomes a hash of the build, so every deploy starts with fresh caches and
+ * deletes the old ones, and SHELL becomes the list of every built file. The values
+ * here are only used by the dev server.
  */
-const VERSION = "v15";
+const VERSION = "dev";
 const SHELL_CACHE = `cm-shell-${VERSION}`;
 const API_CACHE = `cm-api-${VERSION}`;
 const SHELL = [
@@ -86,9 +94,31 @@ self.addEventListener("fetch", (event) => {
       ? networkFirst(request)
       : isLocal
         ? fetch(request, { cache: "no-store" }).catch(() => cacheFirst(request))
-        : cacheFirst(request),
+        : request.mode === "navigate"
+          ? networkFirstPage(request)
+          : cacheFirst(request),
   );
 });
+
+/**
+ * Fetch the page from the network (keeping a copy), or serve the cached page offline.
+ * @param {Request} request a navigation request
+ * @returns {Promise<Response>}
+ */
+async function networkFirstPage(request) {
+  try {
+    const response = await fetch(request);
+    if (response.ok)
+      putInCacheBestEffort(SHELL_CACHE, request, response.clone());
+    return response;
+  } catch (error) {
+    const cachedResponse =
+      (await caches.match(request, { ignoreSearch: true })) ||
+      (await caches.match("./"));
+    if (!cachedResponse) throw error;
+    return cachedResponse;
+  }
+}
 
 async function networkFirst(request) {
   const cache = await caches.open(API_CACHE);

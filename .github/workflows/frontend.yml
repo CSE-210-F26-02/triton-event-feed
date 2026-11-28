@@ -28,3 +28,7 @@ jobs:
             - name: Run unit tests
               run: npm test
               working-directory: ./frontend
+            # The backend serves this build (frontend/dist), so it must keep building.
+            - name: Build with Vite
+              run: cp .env.example .env && npm run build
+              working-directory: ./frontend

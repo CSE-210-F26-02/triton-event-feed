@@ -20,8 +20,8 @@ jobs:
       # Wheels only, so no package runs a setup script. The backend itself is not
       # installed: pytest imports it from this directory (pyproject pythonpath).
       - run: pip install --only-binary :all: --require-hashes -r requirements-dev.lock
-      - run: ruff check app tests
-      - run: ruff format --check app tests
+      - run: ruff check .
+      - run: ruff format --check .
       - run: pytest -q
 
   frontend:
@@ -56,6 +56,9 @@ jobs:
         with:
           node-version: "22"
       - run: npm ci --ignore-scripts
+      # serve.sh builds the frontend (Vite) before starting the backend that serves it.
+      - run: npm ci --ignore-scripts && cp .env.example .env
+        working-directory: frontend
       # npm scripts run the locally installed (package-lock pinned) Playwright,
       # unlike npx, which could fetch and run a package on demand.
       - run: npm run install-browsers

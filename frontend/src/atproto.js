@@ -138,7 +138,7 @@ export function createAtprotoWriter({
   }
 
   async function resolveHandle(handle) {
-    let lastErr;
+    let lastError;
     for (const base of resolverBases) {
       try {
         const encodedHandle = encodeURIComponent(handle);
@@ -147,10 +147,10 @@ export function createAtprotoWriter({
         );
         if (resolvedDid) return resolvedDid;
       } catch (error) {
-        lastErr = error;
+        lastError = error;
       }
     }
-    throw lastErr || new Error(`Could not resolve handle ${handle}`);
+    throw lastError || new Error(`Could not resolve handle ${handle}`);
   }
 
   async function resolvePdsUrl(accountDid) {

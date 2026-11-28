@@ -1,4 +1,5 @@
-"""Run every shared fixture in fixtures/subscription/ through
+"""
+Run every shared fixture in fixtures/subscription/ through
 validate_subscription.
 
 The frontend's Vitest suite runs the same files, so both validators must
@@ -10,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from backend.lexicon import SUBSCRIPTION_NSID, validate_subscription
-from backend.lexicon.subscription import LEXICON_PATH
+from lexicon import SUBSCRIPTION_NSID, validate_subscription
+from lexicon.subscription import LEXICON_PATH
 
 # backend/tests/test_subscription_lexicon.py -> parents[2] is the repo root.
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -23,8 +24,10 @@ EVENT_CID = "bafyreihooyosut5ztb3xty23uwoyij5ovnqr5qldanntxmah33quatfwoy"
 
 
 def load_fixtures(folder):
-    """Return a pytest.param per .json file in
-    fixtures/subscription/<folder>/."""
+    """
+    Return a pytest.param per .json file in
+    fixtures/subscription/<folder>/.
+    """
     files = sorted((FIXTURES_DIR / folder).glob("*.json"))
     return [
         pytest.param(
@@ -64,9 +67,8 @@ def test_valid_fixture(fixture):
 def test_invalid_fixture(fixture):
     errors = validate_subscription(fixture["record"])
     expected = fixture["expectedErrorContains"]
-    assert any(
-        expected in error for error in errors
-    ), f"expected an error containing {expected!r}, got {errors}"
+    message = f"expected an error containing {expected!r}, got {errors}"
+    assert any(expected in error for error in errors), message
 
 
 def test_lexicon_path_exists():

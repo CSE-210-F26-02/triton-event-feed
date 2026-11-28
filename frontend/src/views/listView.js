@@ -75,7 +75,7 @@ export function renderCard(event, options = {}) {
   const titleId = `${idPrefix}-${hashId(event.uri)}`;
   const ended = isEnded(event, options.now);
   const href = osmUrl(event);
-  const isSub = subscribed.has(event.uri);
+  const isSubscribed = subscribed.has(event.uri);
   const distance = formatDistance(event.distanceKm);
   const group = describeGroup(event.group); // lexicon strongRef or legacy string
 
@@ -153,7 +153,7 @@ export function renderCard(event, options = {}) {
       "div",
       { class: "card__actions" },
       renderSubscribeButton(event, {
-        subscribed: isSub,
+        subscribed: isSubscribed,
         ended,
         variant: "plain",
         dataset: { focusKey: `sub:${event.uri}` },

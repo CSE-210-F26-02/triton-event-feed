@@ -5,4 +5,5 @@ data
 .git
 **/tests
 frontend/vitest.config.js
-frontend/package*.json
+# Local settings (may hold secrets); the image is configured by ENV and the host.
+**/.env

@@ -1,12 +1,16 @@
-"""Sample UCSD campus events for local development. Run: python -m app.seed"""
+"""
+Sample UCSD campus events for local development.
+
+Run from the backend/ folder: python seed.py
+"""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from app.config import get_settings
-from app.models import EVENT_NSID, EventRecord, IndexedEvent, Location
-from app.store.base import EventStore
+from config import load_settings_from_environment
+from models import EVENT_NSID, EventRecord, IndexedEvent, Location
+from store.base import EventStore
 
 PLACES: dict[str, tuple[str, str, str]] = {
     "price": ("Price Center", "32.8797", "-117.2362"),
@@ -22,8 +26,15 @@ PLACES: dict[str, tuple[str, str, str]] = {
     "pier": ("Scripps Pier", "32.8665", "-117.2546"),
 }
 
-# (rkey, did, handle, name, description, place, start offset h, duration h, tags, group)
-SEED: list[tuple[str, str, str, str, str, str, float, float, list[str], str | None]] = [
+SEED_ADDRESS = "9500 Gilman Dr, La Jolla, CA"
+SEED_CID_PREFIX = "bafyreiseed"
+
+# (rkey, did, handle, name, description, place, start offset in hours,
+#  duration in hours, tags, group)
+SeedRow = tuple[
+    str, str, str, str, str, str, float, float, list[str], str | None
+]
+SEED: list[SeedRow] = [
     (
         "seed01",
         "did:plc:seedtritonfood",
@@ -171,50 +182,68 @@ SEED: list[tuple[str, str, str, str, str, str, float, float, list[str], str | No
 ]
 
 
+def _seed_event(row: SeedRow, now: datetime) -> IndexedEvent:
+    """
+    Build one sample event from a SEED row, timed relative to now.
+
+    Args:
+        row: one entry of SEED.
+        now: the moment the start offsets are measured from.
+
+    Returns:
+        The sample event, ready to upsert.
+    """
+    rkey, did, handle, name, description, place = row[:6]
+    start_hours, duration_hours, tags, group = row[6:]
+    location_name, lat, lng = PLACES[place]
+    starts = now + timedelta(hours=start_hours)
+    record = EventRecord(
+        name=name,
+        description=description,
+        starts_at=starts,
+        ends_at=starts + timedelta(hours=duration_hours),
+        location=Location(
+            name=location_name, address=SEED_ADDRESS, lat=lat, lng=lng
+        ),
+        tags=tags,
+        group=group,
+        created_at=now,
+    )
+    return IndexedEvent(
+        uri=f"at://{did}/{EVENT_NSID}/{rkey}",
+        cid=f"{SEED_CID_PREFIX}{rkey}",
+        author_did=did,
+        author_handle=handle,
+        source="atproto",
+        record=record,
+        indexed_at=now,
+        updated_at=now,
+    )
+
+
 def seed_events(now: datetime) -> list[IndexedEvent]:
-    out = []
-    for rkey, did, handle, name, desc, place, start_h, dur_h, tags, group in SEED:
-        loc_name, lat, lng = PLACES[place]
-        starts = now + timedelta(hours=start_h)
-        record = EventRecord(
-            name=name,
-            description=desc,
-            starts_at=starts,
-            ends_at=starts + timedelta(hours=dur_h),
-            location=Location(
-                name=loc_name, address="9500 Gilman Dr, La Jolla, CA", lat=lat, lng=lng
-            ),
-            tags=tags,
-            group=group,
-            created_at=now,
-        )
-        out.append(
-            IndexedEvent(
-                uri=f"at://{did}/{EVENT_NSID}/{rkey}",
-                cid=f"bafyreiseed{rkey}",
-                author_did=did,
-                author_handle=handle,
-                source="atproto",
-                record=record,
-                indexed_at=now,
-                updated_at=now,
-            )
-        )
-    return out
+    """Return every sample event, timed relative to now."""
+    return [_seed_event(row, now) for row in SEED]
 
 
 def seed(store: EventStore, now: datetime) -> int:
     """Upsert the sample events; returns how many were written."""
-    return sum(store.upsert_event(ev) != "unchanged" for ev in seed_events(now))
+    return sum(
+        store.upsert_event(event) != "unchanged" for event in seed_events(now)
+    )
 
 
 def main() -> None:
-    from app.store.sqlite import SqliteStore
+    """Seed the database named by DATABASE_PATH (see backend/.env)."""
+    from store.sqlite import SqliteStore
 
-    settings = get_settings()
-    store = SqliteStore(settings.db_path)
-    n = seed(store, datetime.now(UTC))
-    print(f"seeded {n} events into {settings.db_path}")
+    settings = load_settings_from_environment()
+    store = SqliteStore(settings.database_path)
+    try:
+        written_count = seed(store, datetime.now(UTC))
+    finally:
+        store.close()
+    print(f"seeded {written_count} events into {settings.database_path}")
 
 
 if __name__ == "__main__":

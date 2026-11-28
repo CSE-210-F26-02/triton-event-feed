@@ -9,23 +9,26 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from app.ingest.jetstream import (
+from ingest.jetstream import (
     Backoff,
     CursorSaver,
     JetstreamClient,
     parse_message,
     resume_cursor,
 )
-from app.ingest.processor import CommitProcessor
-from app.models import EVENT_NSID, LISTENER_NSID, POST_NSID
+from ingest.processor import CommitProcessor
+from models import EVENT_NSID, LISTENER_NSID, POST_NSID
 from tests.ingest_fakes import FakeNotifier, FakeStore
 
-BASE = "wss://js.example/subscribe"
-DID = "did:plc:alice"
+JETSTREAM_BASE_URL = "wss://js.example/subscribe"
+AUTHOR_DID = "did:plc:alice"
 
 
 class FakeConnect:
-    """Each call pops a script: a list of raw messages, or an Exception to raise on connect."""
+    """
+    Each call pops a script: a list of raw messages, or an Exception to
+    raise on connect.
+    """
 
     def __init__(self, scripts: list[list[str] | Exception]) -> None:
         self.scripts = scripts
@@ -36,30 +39,33 @@ class FakeConnect:
         script = self.scripts.pop(0) if self.scripts else []
 
         @asynccontextmanager
-        async def cm() -> AsyncIterator[AsyncIterator[str]]:
+        async def connection_context() -> AsyncIterator[AsyncIterator[str]]:
             if isinstance(script, Exception):
                 raise script
 
-            async def gen() -> AsyncIterator[str]:
-                for m in script:
-                    yield m
+            async def message_stream() -> AsyncIterator[str]:
+                for message in script:
+                    yield message
 
-            yield gen()
+            yield message_stream()
 
-        return cm()
+        return connection_context()
 
 
 class StopAfter:
-    """Fake sleep: records delays, cancels the loop after n sleeps."""
+    """
+    Fake sleep: records delays, cancels the loop after sleep_limit
+    sleeps.
+    """
 
-    def __init__(self, n: int) -> None:
-        self.n = n
+    def __init__(self, sleep_limit: int) -> None:
+        self.sleep_limit = sleep_limit
         self.delays: list[float] = []
 
     async def __call__(self, delay: float) -> None:
         self.delays.append(delay)
         await asyncio.sleep(0)  # yield like a real sleep
-        if len(self.delays) >= self.n:
+        if len(self.delays) >= self.sleep_limit:
             raise asyncio.CancelledError
 
 
@@ -67,12 +73,18 @@ def make_client(
     connect: FakeConnect, sleep: StopAfter | None = None
 ) -> tuple[JetstreamClient, FakeStore]:
     store = FakeStore()
-    proc = CommitProcessor(store, FakeNotifier(store))
-    client = JetstreamClient(BASE, proc, store, connect=connect, sleep=sleep or StopAfter(1))
+    processor = CommitProcessor(store, FakeNotifier(store))
+    client = JetstreamClient(
+        JETSTREAM_BASE_URL,
+        processor,
+        store,
+        connect=connect,
+        sleep=sleep or StopAfter(1),
+    )
     return client, store
 
 
-def event_msg(rkey: str, time_us: int) -> str:
+def event_message(rkey: str, time_us: int) -> str:
     record = {
         "name": "Taco Night",
         "startsAt": "2026-11-12T18:00:00Z",
@@ -80,8 +92,20 @@ def event_msg(rkey: str, time_us: int) -> str:
         "location": {"name": "Price Center"},
         "createdAt": "2026-11-11T00:00:00Z",
     }
-    commit = {"operation": "create", "collection": EVENT_NSID, "rkey": rkey, "record": record}
-    return json.dumps({"did": DID, "time_us": time_us, "kind": "commit", "commit": commit})
+    commit = {
+        "operation": "create",
+        "collection": EVENT_NSID,
+        "rkey": rkey,
+        "record": record,
+    }
+    return json.dumps(
+        {
+            "did": AUTHOR_DID,
+            "time_us": time_us,
+            "kind": "commit",
+            "commit": commit,
+        }
+    )
 
 
 def query(url: str) -> dict[str, list[str]]:
@@ -92,14 +116,16 @@ def query(url: str) -> dict[str, list[str]]:
 
 
 def test_build_url() -> None:
-    client, _ = make_client(FakeConnect([]))
-    url = client.build_url([EVENT_NSID, LISTENER_NSID], ["did:plc:a", "did:plc:b"], 123)
-    assert url.startswith(BASE + "?")
-    q = query(url)
-    assert q["wantedCollections"] == [EVENT_NSID, LISTENER_NSID]
-    assert q["wantedDids"] == ["did:plc:a", "did:plc:b"]
-    assert q["cursor"] == ["123"]
-    assert client.build_url([], [], None) == BASE
+    client, _store = make_client(FakeConnect([]))
+    url = client.build_url(
+        [EVENT_NSID, LISTENER_NSID], ["did:plc:a", "did:plc:b"], 123
+    )
+    assert url.startswith(JETSTREAM_BASE_URL + "?")
+    params = query(url)
+    assert params["wantedCollections"] == [EVENT_NSID, LISTENER_NSID]
+    assert params["wantedDids"] == ["did:plc:a", "did:plc:b"]
+    assert params["cursor"] == ["123"]
+    assert client.build_url([], [], None) == JETSTREAM_BASE_URL
 
 
 def test_parse_message() -> None:
@@ -116,16 +142,19 @@ def test_resume_cursor_rewinds_five_seconds() -> None:
 
 
 def test_backoff_doubles_and_caps() -> None:
-    b = Backoff()
-    assert [b.next() for _ in range(8)] == [1, 2, 4, 8, 16, 32, 60, 60]
-    b.reset()
-    assert b.next() == 1
+    backoff = Backoff()
+    delays = [backoff.next_delay() for _attempt in range(8)]
+    assert delays == [1, 2, 4, 8, 16, 32, 60, 60]
+    backoff.reset()
+    assert backoff.next_delay() == 1
 
 
-def test_cursor_saver_every_n_and_interval() -> None:
+def test_cursor_saver_every_count_and_interval() -> None:
     store = FakeStore()
     now = [0.0]
-    saver = CursorSaver(store, "js", every=3, interval_s=5, clock=lambda: now[0])
+    saver = CursorSaver(
+        store, "js", every=3, interval_seconds=5, clock=lambda: now[0]
+    )
     saver.seen(10)
     saver.seen(20)
     assert store.get_cursor("js") is None
@@ -144,10 +173,12 @@ def test_cursor_saver_every_n_and_interval() -> None:
 
 
 async def test_consume_processes_and_saves_cursor() -> None:
-    connect = FakeConnect([[event_msg("a", 100), "garbage", event_msg("b", 200)]])
+    connect = FakeConnect(
+        [[event_message("a", 100), "garbage", event_message("b", 200)]]
+    )
     client, store = make_client(connect)
-    n = await client.consume_once("js", [EVENT_NSID], [])
-    assert n == 3
+    message_count = await client.consume_once("js", [EVENT_NSID], [])
+    assert message_count == 3
     assert len(store.events) == 2
     assert store.get_cursor("js") == 200
     assert "cursor" not in query(connect.urls[0])
@@ -162,19 +193,21 @@ async def test_consume_resumes_from_rewound_cursor() -> None:
 
 
 async def test_processor_errors_do_not_drop_connection() -> None:
-    connect = FakeConnect([[event_msg("a", 100), event_msg("b", 200)]])
+    connect = FakeConnect([[event_message("a", 100), event_message("b", 200)]])
     client, store = make_client(connect)
 
-    async def boom(msg: dict[str, Any]) -> None:
+    async def failing_handle(message: dict[str, Any]) -> None:
         raise RuntimeError("db down")
 
-    client.processor.handle = boom  # type: ignore[method-assign]
+    client.processor.handle = failing_handle  # type: ignore[method-assign]
     assert await client.consume_once("js", [EVENT_NSID], []) == 2
     assert store.get_cursor("js") == 200
 
 
 async def test_run_stream_reconnects_with_backoff() -> None:
-    connect = FakeConnect([OSError("refused"), OSError("refused"), [event_msg("a", 1)], []])
+    connect = FakeConnect(
+        [OSError("refused"), OSError("refused"), [event_message("a", 1)], []]
+    )
     sleep = StopAfter(4)
     client, store = make_client(connect, sleep)
     with pytest.raises(asyncio.CancelledError):
@@ -190,21 +223,30 @@ async def test_posts_stream_only_with_listener_dids() -> None:
     task = asyncio.create_task(client.run_forever())
     await asyncio.sleep(0.01)
     urls = list(connect.urls)
-    assert urls and all(POST_NSID not in u for u in urls)
+    assert urls and all(POST_NSID not in url for url in urls)
 
     listener = {
-        "subject": f"at://{DID}/{EVENT_NSID}/ev1",
+        "subject": f"at://{AUTHOR_DID}/{EVENT_NSID}/ev1",
         "hashtag": "tacos",
         "createdAt": "2026-11-11T00:00:00Z",
     }
-    commit = {"operation": "create", "collection": LISTENER_NSID, "rkey": "l1", "record": listener}
-    await client.processor.handle({"did": DID, "kind": "commit", "commit": commit})
+    commit = {
+        "operation": "create",
+        "collection": LISTENER_NSID,
+        "rkey": "l1",
+        "record": listener,
+    }
+    await client.processor.handle(
+        {"did": AUTHOR_DID, "kind": "commit", "commit": commit}
+    )
     await asyncio.sleep(0.01)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
 
-    post_urls = [u for u in connect.urls if POST_NSID in u]
+    post_urls = [url for url in connect.urls if POST_NSID in url]
     assert post_urls
-    assert all(query(u)["wantedDids"] == [DID] for u in post_urls)
-    assert all(query(u)["wantedCollections"] == [POST_NSID] for u in post_urls)
+    assert all(query(url)["wantedDids"] == [AUTHOR_DID] for url in post_urls)
+    assert all(
+        query(url)["wantedCollections"] == [POST_NSID] for url in post_urls
+    )

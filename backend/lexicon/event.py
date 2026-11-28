@@ -1,4 +1,5 @@
-"""Validator for app.communitymap.event records.
+"""
+Validator for app.communitymap.event records.
 
 The schema lives in lexicons/app/communitymap/event.json at the repo root.
 This module reads its size limits from that file, so the numbers here can
@@ -13,7 +14,7 @@ create-event form rule (issue #6); otherwise every event that has already
 happened would be rejected.
 
 Example:
-    >>> from backend.lexicon import validate_event
+    >>> from lexicon import validate_event
     >>> validate_event({"$type": "app.communitymap.event"})
     ['name is required', ...]
 """
@@ -67,7 +68,8 @@ _COORD_RANGES = {"lat": (-90, 90), "lng": (-180, 180)}
 
 
 def count_graphemes(text: str) -> int:
-    """Count characters the way a person sees them.
+    """
+    Count characters the way a person sees them.
 
     One emoji or one accented letter counts as 1, even when it is made of
     several Unicode code points. The \\X pattern matches one such character.
@@ -76,7 +78,8 @@ def count_graphemes(text: str) -> int:
 
 
 def _check_string(value: Any, field: str, rules: dict) -> list[str]:
-    """Check a string against its lexicon rules.
+    """
+    Check a string against its lexicon rules.
 
     maxLength and minLength are measured in UTF-8 bytes, and maxGraphemes
     in visible characters, as the AT Protocol lexicon spec defines them.
@@ -103,7 +106,8 @@ def _check_string(value: Any, field: str, rules: dict) -> list[str]:
 
 
 def parse_datetime(value: Any) -> datetime | None:
-    """Return a datetime if value is a valid AT Protocol datetime string.
+    """
+    Return a datetime if value is a valid AT Protocol datetime string.
 
     Returns None if it isn't (wrong type, wrong format, timezone "-00:00",
     or an impossible date such as February 30).
@@ -201,7 +205,8 @@ def _check_group(group: Any) -> list[str]:
 
 
 def validate_event(record: Any) -> list[str]:
-    """Check an app.communitymap.event record.
+    """
+    Check an app.communitymap.event record.
 
     Args:
         record: the event as a dict (e.g. parsed JSON from a PDS).

@@ -2,18 +2,21 @@
 
 from fastapi import Request
 
-from app.config import Settings
-from app.notify.base import Notifier
-from app.store.base import EventStore
+from config import Settings
+from notify.base import Notifier
+from store.base import EventStore
 
 
 def get_store(request: Request) -> EventStore:
+    """Return the event store that main.py placed on app.state."""
     return request.app.state.store
 
 
 def get_notifier(request: Request) -> Notifier:
+    """Return the notifier that main.py placed on app.state."""
     return request.app.state.notifier
 
 
 def get_app_settings(request: Request) -> Settings:
+    """Return the validated settings that main.py placed on app.state."""
     return request.app.state.settings

@@ -1,10 +1,15 @@
 {
     "cSpell.words": [
         "atproto",
+        "bsky",
+        "communitymap",
         "dotenv",
         "fastapi",
+        "IPPROTO",
         "itertools",
         "Jetstream",
+        "NSID",
+        "SOCKADDR",
         "uvicorn",
         "Vitest"
     ]

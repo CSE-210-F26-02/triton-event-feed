@@ -9,23 +9,30 @@
 <body>
   <div class="container">
     <h1>Login</h1>
-    <h2 id="logout-header" style="display: none;">Successfully logged out</h2>
-    <h2 id="success-header" style="display: none;">Sucessfully logged in</h2>
-    <h2 id="fail-header" style="display: none;">Login attempt failed, please retry</h2>
-    <h2 id="invalid-user-header" style="display: none;">Invalid username or password, please retry</h2>
+    <h2 id="logout-header" style="display: none">Successfully logged out</h2>
+    <h2 id="success-header" style="display: none">Sucessfully logged in</h2>
+    <h2 id="fail-header" style="display: none">
+      Login attempt failed, please retry
+    </h2>
+    <h2 id="invalid-user-header" style="display: none">
+      Invalid username or password, please retry
+    </h2>
     <div>
-        <label for="user-handle">User Handle:</label>
-        <input type="text" id="user-handle" spellcheck="false" size="20">
+      <label for="user-handle">User Handle:</label>
+      <input type="text" id="user-handle" spellcheck="false" size="20" />
     </div>
-    <input type="button" value="Login with BlueSky OAuth" id="bsky-oauth-login">
+    <input
+      type="button"
+      value="Login with BlueSky OAuth"
+      id="bsky-oauth-login"
+    />
     <h2>Developer/Legacy Login</h2>
 
     <div>
-        <label for="app-pw">App Password:</label>
-        <input type="text" id="app-pw" spellcheck="false" size="20">
+      <label for="app-pw">App Password:</label>
+      <input type="text" id="app-pw" spellcheck="false" size="20" />
     </div>
-    <input type="button" id="password-login" value="Submit">
-    <input type="button" id="logout" value="Logout">
-    
+    <input type="button" id="password-login" value="Submit" />
+    <input type="button" id="logout" value="Logout" />
   </div>
 </body>

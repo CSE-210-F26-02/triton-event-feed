@@ -10,67 +10,68 @@ const auth = new AuthProvider();
 
 // Setup header toggles for when login fails. (typically when user cancels at OAuth screen)
 auth.onFailedLogin = () => {
-    document.getElementById("success-header").style.display = "none";
-    document.getElementById("logout-header").style.display = "none";
-    document.getElementById("invalid-user-header").style.display = "none";
-    document.getElementById("fail-header").style.display = "inherit";
+  document.getElementById("success-header").style.display = "none";
+  document.getElementById("logout-header").style.display = "none";
+  document.getElementById("invalid-user-header").style.display = "none";
+  document.getElementById("fail-header").style.display = "inherit";
 };
 
 // Setup header toggles for when user information is invalid.
 auth.onInvalidUserInfo = () => {
-    document.getElementById("fail-header").style.display = "none";
-    document.getElementById("success-header").style.display = "none";
-    document.getElementById("logout-header").style.display = "none";
-    document.getElementById("invalid-user-header").style.display = "inherit";
+  document.getElementById("fail-header").style.display = "none";
+  document.getElementById("success-header").style.display = "none";
+  document.getElementById("logout-header").style.display = "none";
+  document.getElementById("invalid-user-header").style.display = "inherit";
 };
 
 // Setup header toggles for when login is successful.
 auth.onSuccessfulLogin = () => {
-    document.getElementById("fail-header").style.display = "none";
-    document.getElementById("invalid-user-header").style.display = "none";
-    document.getElementById("logout-header").style.display = "none";
-    document.getElementById("success-header").style.display = "inherit";
+  document.getElementById("fail-header").style.display = "none";
+  document.getElementById("invalid-user-header").style.display = "none";
+  document.getElementById("logout-header").style.display = "none";
+  document.getElementById("success-header").style.display = "inherit";
 };
 
 // Setup header toggles for logout.
 auth.onLogout = () => {
-    document.getElementById("fail-header").style.display = "none";
-    document.getElementById("invalid-user-header").style.display = "none";
-    document.getElementById("success-header").style.display = "none";
-    document.getElementById("logout-header").style.display = "inherit";
+  document.getElementById("fail-header").style.display = "none";
+  document.getElementById("invalid-user-header").style.display = "none";
+  document.getElementById("success-header").style.display = "none";
+  document.getElementById("logout-header").style.display = "inherit";
 };
 
-
 // Demo function
-function checkSession(){
-    const validSession = auth.isSessionValid();
+function checkSession() {
+  const validSession = auth.isSessionValid();
 
-    console.log(`Session valid: ${validSession}`);
-    if (validSession) {
-        console.log(`Session: ${auth.client.did}`);
-    } 
+  console.log(`Session valid: ${validSession}`);
+  if (validSession) {
+    console.log(`Session: ${auth.client.did}`);
+  }
 }
 
 // OAuth/Password flow
 const initOutcome = await auth.init();
 if (initOutcome) {
-    console.log("Successful login");
-    checkSession();
+  console.log("Successful login");
+  checkSession();
 }
 
 // Controls
-document.getElementById("bsky-oauth-login").onclick = async (event) => {
-    await auth.login(document.getElementById("user-handle").value);
-    checkSession();
+document.getElementById("bsky-oauth-login").onclick = async () => {
+  await auth.login(document.getElementById("user-handle").value);
+  checkSession();
 };
 
-document.getElementById("password-login").onclick = async (event) => {
-    await auth.login(document.getElementById("user-handle").value, document.getElementById("app-pw").value);
-    checkSession();
+document.getElementById("password-login").onclick = async () => {
+  await auth.login(
+    document.getElementById("user-handle").value,
+    document.getElementById("app-pw").value,
+  );
+  checkSession();
 };
 
-document.getElementById("logout").onclick = async (event) => {
-    await auth.logout();
-    checkSession();
+document.getElementById("logout").onclick = async () => {
+  await auth.logout();
+  checkSession();
 };
-

@@ -1,4 +1,5 @@
-"""Run every shared fixture in fixtures/event/ through validate_event.
+"""
+Run every shared fixture in fixtures/event/ through validate_event.
 
 The frontend's Vitest suite runs the same files, so both validators must
 agree on what a valid event is.
@@ -9,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from backend.lexicon import validate_event
-from backend.lexicon.event import LEXICON_PATH, count_graphemes
+from lexicon import validate_event
+from lexicon.event import LEXICON_PATH, count_graphemes
 
 # backend/tests/test_event_lexicon.py -> parents[2] is the repo root.
 FIXTURES_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "event"
@@ -46,9 +47,8 @@ def test_valid_fixture(fixture):
 def test_invalid_fixture(fixture):
     errors = validate_event(fixture["record"])
     expected = fixture["expectedErrorContains"]
-    assert any(
-        expected in error for error in errors
-    ), f"expected an error containing {expected!r}, got {errors}"
+    message = f"expected an error containing {expected!r}, got {errors}"
+    assert any(expected in error for error in errors), message
 
 
 def test_lexicon_path_exists():

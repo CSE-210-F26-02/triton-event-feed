@@ -6,11 +6,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api import events, meta, subscriptions
-from app.config import Settings
-from app.models import EVENT_NSID, EventRecord, IndexedEvent, Location
-from app.notify.service import SubscriptionNotifier
-from app.store.sqlite import SqliteStore
+from api import events, meta, subscriptions
+from config import Settings
+from models import EVENT_NSID, EventRecord, IndexedEvent, Location
+from notify.service import SubscriptionNotifier
+from store.sqlite import SqliteStore
+from tests.settings_factory import make_test_settings
 
 MakeEvent = Callable[..., IndexedEvent]
 
@@ -22,9 +23,9 @@ def now() -> datetime:
 
 @pytest.fixture
 def store() -> Iterator[SqliteStore]:
-    s = SqliteStore(":memory:")
-    yield s
-    s.close()
+    sqlite_store = SqliteStore(":memory:")
+    yield sqlite_store
+    sqlite_store.close()
 
 
 @pytest.fixture
@@ -36,12 +37,12 @@ def notifier(store: SqliteStore) -> SubscriptionNotifier:
 def make_event(now: datetime) -> MakeEvent:
     """Build an IndexedEvent; times are hour offsets from `now`."""
 
-    def _make(
+    def _make_event(
         rkey: str = "e1",
         *,
         name: str = "Test Event",
-        start_h: float = 1,
-        end_h: float = 2,
+        start_in_hours: float = 1,
+        end_in_hours: float = 2,
         tags: list[str] | None = None,
         group: str | None = None,
         description: str = "",
@@ -53,14 +54,18 @@ def make_event(now: datetime) -> MakeEvent:
         record = EventRecord(
             name=name,
             description=description,
-            starts_at=now + timedelta(hours=start_h),
-            ends_at=now + timedelta(hours=end_h),
+            starts_at=now + timedelta(hours=start_in_hours),
+            ends_at=now + timedelta(hours=end_in_hours),
             location=Location(name=location, lat="32.8797", lng="-117.2362"),
             tags=tags or [],
             group=group,
             created_at=now,
         )
-        fields: dict[str, Any] = {"indexed_at": now, "updated_at": now, **extra}
+        fields: dict[str, Any] = {
+            "indexed_at": now,
+            "updated_at": now,
+            **extra,
+        }
         return IndexedEvent(
             uri=f"at://{did}/{EVENT_NSID}/{rkey}",
             cid=cid,
@@ -69,16 +74,18 @@ def make_event(now: datetime) -> MakeEvent:
             **fields,
         )
 
-    return _make
+    return _make_event
 
 
 @pytest.fixture
 def settings() -> Settings:
-    return Settings(db_path=":memory:", dev_mode=True, jetstream_enabled=False)
+    return make_test_settings(dev_mode=True)
 
 
 @pytest.fixture
-def app(store: SqliteStore, notifier: SubscriptionNotifier, settings: Settings) -> FastAPI:
+def app(
+    store: SqliteStore, notifier: SubscriptionNotifier, settings: Settings
+) -> FastAPI:
     app = FastAPI()
     for module in (meta, events, subscriptions):
         app.include_router(module.router)
@@ -90,5 +97,5 @@ def app(store: SqliteStore, notifier: SubscriptionNotifier, settings: Settings) 
 
 @pytest.fixture
 def client(app: FastAPI) -> Iterator[TestClient]:
-    with TestClient(app) as c:
-        yield c
+    with TestClient(app) as test_client:
+        yield test_client

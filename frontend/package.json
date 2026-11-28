@@ -7,6 +7,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
     "test": "vitest run",
     "lint": "eslint .",
     "format": "prettier --write .",
@@ -20,7 +22,8 @@
     "globals": "^17.14.0",
     "jsdom": "^29.1.1",
     "prettier": "^3.10.1",
-    "vite": "^8.3.8"
+    "vite": "^8.3.8",
+    "vitest": "^5.1.2"
   },
   "dependencies": {
     "@atproto/api": "^0.32.7",

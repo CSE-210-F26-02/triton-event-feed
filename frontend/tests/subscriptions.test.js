@@ -67,12 +67,12 @@ function fakeRepo(initial = []) {
 function setup({ repo = fakeRepo(), now = BEFORE } = {}) {
   const onChange = vi.fn();
   let currentRepo = repo;
-  const subs = createSubscriptions({
+  const subscriptions = createSubscriptions({
     getRepo: () => currentRepo,
     onChange,
     now: () => now,
   });
-  return { subs, repo, onChange, logout: () => (currentRepo = null) };
+  return { subscriptions, repo, onChange, logout: () => (currentRepo = null) };
 }
 
 describe("indexSubscriptionRecords", () => {
@@ -116,46 +116,49 @@ describe("indexSubscriptionRecords", () => {
 
 describe("createSubscriptions", () => {
   it("load() reads the user's records from their PDS", async () => {
-    const { subs, onChange } = setup({
+    const { subscriptions, onChange } = setup({
       repo: fakeRepo([listed(eventA, "3k1")]),
     });
-    await subs.load();
-    expect(subs.has(eventA.uri)).toBe(true);
-    expect(subs.ownerDid).toBe(MY_DID);
+    await subscriptions.load();
+    expect(subscriptions.has(eventA.uri)).toBe(true);
+    expect(subscriptions.ownerDid).toBe(MY_DID);
     expect(onChange).toHaveBeenLastCalledWith(new Set([eventA.uri]));
   });
 
   it("load() while logged out leaves nothing subscribed", async () => {
-    const { subs, onChange } = setup({ repo: null });
-    await subs.load();
-    expect(subs.subscribed).toEqual(new Set());
+    const { subscriptions, onChange } = setup({ repo: null });
+    await subscriptions.load();
+    expect(subscriptions.subscribed).toEqual(new Set());
     expect(onChange).toHaveBeenCalledWith(new Set());
   });
 
   it("load() failures propagate and keep the previous state", async () => {
     const repo = fakeRepo([listed(eventA, "3k1")]);
-    const { subs } = setup({ repo });
-    await subs.load();
+    const { subscriptions } = setup({ repo });
+    await subscriptions.load();
     repo.listSubscriptions.mockRejectedValueOnce(new Error("offline"));
-    await expect(subs.load()).rejects.toThrow("offline");
-    expect(subs.has(eventA.uri)).toBe(true);
+    await expect(subscriptions.load()).rejects.toThrow("offline");
+    expect(subscriptions.has(eventA.uri)).toBe(true);
   });
 
   it("subscribe() publishes a valid strongRef record and tracks it", async () => {
-    const { subs, repo } = setup();
-    await expect(subs.subscribe(eventA)).resolves.toBe(true);
+    const { subscriptions, repo } = setup();
+    await expect(subscriptions.subscribe(eventA)).resolves.toBe(true);
     expect(repo.createSubscription).toHaveBeenCalledWith({
       $type: SUBSCRIPTION_NSID,
       subject: { uri: eventA.uri, cid: eventA.cid },
       createdAt: BEFORE.toISOString(),
     });
-    expect(subs.has(eventA.uri)).toBe(true);
+    expect(subscriptions.has(eventA.uri)).toBe(true);
   });
 
   it("subscribe() is a no-op when already subscribed or already in flight", async () => {
-    const { subs, repo } = setup();
-    await Promise.all([subs.subscribe(eventA), subs.subscribe(eventA)]);
-    await subs.subscribe(eventA);
+    const { subscriptions, repo } = setup();
+    await Promise.all([
+      subscriptions.subscribe(eventA),
+      subscriptions.subscribe(eventA),
+    ]);
+    await subscriptions.subscribe(eventA);
     expect(repo.createSubscription).toHaveBeenCalledTimes(1);
   });
 
@@ -165,24 +168,26 @@ describe("createSubscriptions", () => {
       repo.records.push({ ...listed(eventA, "3late"), value: record });
       return {};
     });
-    const { subs } = setup({ repo });
-    await subs.subscribe(eventA);
+    const { subscriptions } = setup({ repo });
+    await subscriptions.subscribe(eventA);
     expect(repo.listSubscriptions).toHaveBeenCalled();
-    await subs.unsubscribe(eventA.uri);
+    await subscriptions.unsubscribe(eventA.uri);
     expect(repo.deleteSubscription).toHaveBeenCalledWith("3late");
   });
 
   it("refuses to subscribe when logged out", async () => {
-    const { subs, repo } = setup({ repo: null });
-    await expect(subs.subscribe(eventA)).rejects.toMatchObject({
+    const { subscriptions, repo } = setup({ repo: null });
+    await expect(subscriptions.subscribe(eventA)).rejects.toMatchObject({
       code: SUBSCRIPTION_ERROR.loginRequired,
     });
     expect(repo).toBeNull();
   });
 
   it("refuses to subscribe to an ended event", async () => {
-    const { subs, repo } = setup({ now: AFTER });
-    const error = await subs.subscribe(eventA).catch((rejection) => rejection);
+    const { subscriptions, repo } = setup({ now: AFTER });
+    const error = await subscriptions
+      .subscribe(eventA)
+      .catch((rejection) => rejection);
     expect(error).toBeInstanceOf(SubscriptionError);
     expect(error.code).toBe(SUBSCRIPTION_ERROR.eventEnded);
     expect(repo.createSubscription).not.toHaveBeenCalled();
@@ -198,8 +203,8 @@ describe("createSubscriptions", () => {
     ["no URI", { ...eventA, uri: undefined }],
     ["not an object", null],
   ])("refuses to publish an invalid record (%s)", async (_label, event) => {
-    const { subs, repo } = setup();
-    await expect(subs.subscribe(event)).rejects.toMatchObject({
+    const { subscriptions, repo } = setup();
+    await expect(subscriptions.subscribe(event)).rejects.toMatchObject({
       code: SUBSCRIPTION_ERROR.invalidEvent,
     });
     expect(repo.createSubscription).not.toHaveBeenCalled();
@@ -207,21 +212,21 @@ describe("createSubscriptions", () => {
 
   it("unsubscribe() deletes every record for the event (deleteRecord)", async () => {
     const repo = fakeRepo([listed(eventA, "3k1"), listed(eventA, "3k2")]);
-    const { subs, onChange } = setup({ repo });
-    await subs.load();
-    await expect(subs.unsubscribe(eventA.uri)).resolves.toBe(false);
+    const { subscriptions, onChange } = setup({ repo });
+    await subscriptions.load();
+    await expect(subscriptions.unsubscribe(eventA.uri)).resolves.toBe(false);
     expect(repo.deleteSubscription.mock.calls).toEqual([["3k1"], ["3k2"]]);
-    expect(subs.has(eventA.uri)).toBe(false);
+    expect(subscriptions.has(eventA.uri)).toBe(false);
     expect(onChange).toHaveBeenLastCalledWith(new Set());
   });
 
   it("unsubscribe() works for ended events", async () => {
-    const { subs, repo } = setup({
+    const { subscriptions, repo } = setup({
       repo: fakeRepo([listed(eventA, "3k1")]),
       now: AFTER,
     });
-    await subs.load();
-    await subs.unsubscribe(eventA.uri);
+    await subscriptions.load();
+    await subscriptions.unsubscribe(eventA.uri);
     expect(repo.deleteSubscription).toHaveBeenCalledWith("3k1");
   });
 
@@ -230,27 +235,29 @@ describe("createSubscriptions", () => {
     repo.deleteSubscription
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error("offline"));
-    const { subs } = setup({ repo });
-    await subs.load();
-    await expect(subs.unsubscribe(eventA.uri)).rejects.toThrow("offline");
-    expect(subs.has(eventA.uri)).toBe(true);
+    const { subscriptions } = setup({ repo });
+    await subscriptions.load();
+    await expect(subscriptions.unsubscribe(eventA.uri)).rejects.toThrow(
+      "offline",
+    );
+    expect(subscriptions.has(eventA.uri)).toBe(true);
     repo.deleteSubscription.mockResolvedValue(undefined);
-    await subs.unsubscribe(eventA.uri);
+    await subscriptions.unsubscribe(eventA.uri);
     expect(repo.deleteSubscription).toHaveBeenLastCalledWith("3k2");
   });
 
   it("toggle() subscribes, then unsubscribes", async () => {
-    const { subs, repo } = setup();
-    await expect(subs.toggle(eventA)).resolves.toBe(true);
-    await expect(subs.toggle(eventA)).resolves.toBe(false);
+    const { subscriptions, repo } = setup();
+    await expect(subscriptions.toggle(eventA)).resolves.toBe(true);
+    await expect(subscriptions.toggle(eventA)).resolves.toBe(false);
     expect(repo.createSubscription).toHaveBeenCalledTimes(1);
     expect(repo.deleteSubscription).toHaveBeenCalledTimes(1);
   });
 
   it("subscriptions persist across stores (the PDS is the source of truth)", async () => {
     const repo = fakeRepo();
-    await setup({ repo }).subs.subscribe(eventA);
-    const { subs: afterReload } = setup({ repo });
+    await setup({ repo }).subscriptions.subscribe(eventA);
+    const { subscriptions: afterReload } = setup({ repo });
     await afterReload.load();
     expect(afterReload.has(eventA.uri)).toBe(true);
   });
@@ -261,18 +268,18 @@ describe("createSubscriptions", () => {
     repo.listSubscriptions.mockImplementationOnce(
       () => new Promise((resolve) => (release = resolve)),
     );
-    const { subs } = setup({ repo });
-    const loading = subs.load();
-    subs.clear();
+    const { subscriptions } = setup({ repo });
+    const loading = subscriptions.load();
+    subscriptions.clear();
     release([listed(eventA, "3k1")]);
     await loading;
-    expect(subs.subscribed).toEqual(new Set());
-    expect(subs.ownerDid).toBeNull();
+    expect(subscriptions.subscribed).toEqual(new Set());
+    expect(subscriptions.ownerDid).toBeNull();
   });
 
   it("refuses to unsubscribe when logged out", async () => {
-    const { subs } = setup({ repo: null });
-    await expect(subs.unsubscribe(eventA.uri)).rejects.toMatchObject({
+    const { subscriptions } = setup({ repo: null });
+    await expect(subscriptions.unsubscribe(eventA.uri)).rejects.toMatchObject({
       code: SUBSCRIPTION_ERROR.loginRequired,
     });
   });

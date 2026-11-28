@@ -208,7 +208,7 @@ export async function start({ config, mockConfig } = {}) {
     onNotification: (notification) => applyNotification(notification),
   });
   // #19: subscriptions are records on the logged-in user's PDS (demo mode has no PDS).
-  const subs = createSubscriptions({
+  const subscriptions = createSubscriptions({
     getRepo: () => (atproto.loggedIn ? atproto : null),
     onChange: (subscribed) => {
       store.set({ subscribed });
@@ -216,7 +216,7 @@ export async function start({ config, mockConfig } = {}) {
     },
   });
   const subscribing = createSubscriptionController({
-    subscriptions: subs,
+    subscriptions,
     notifications,
     toast,
     isLoggedIn: () => atproto.loggedIn,
@@ -411,7 +411,7 @@ export async function start({ config, mockConfig } = {}) {
             class: "btn",
             onclick: async () => {
               await atproto.logout();
-              subs.clear();
+              subscriptions.clear();
               renderAccount();
             },
           },

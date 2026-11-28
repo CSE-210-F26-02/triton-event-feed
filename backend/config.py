@@ -1,8 +1,14 @@
-"""Backend settings, read from environment variables.
+"""
+Backend settings, read from environment variables.
 
 Every deployment-specific value (host, port, allowed CORS origins, log level,
-...) lives in backend/.env, never in code. backend/.env.example lists every
-variable with a working development value: copy it to backend/.env and edit.
+database path, ...) lives in backend/.env, never in code.
+backend/.env.example lists every variable with a working development value:
+copy it to backend/.env and edit.
+
+Tuning knobs that rarely change between deployments (how often the expiry
+sweep and the iCal poller run, which Jetstream instance to use, ...) are
+optional: when they are unset, the documented default below is used.
 
 Real environment variables (e.g. set by a hosting provider) win over the
 .env file, so production can configure the app without a file on disk.
@@ -12,12 +18,13 @@ misconfigured server fails immediately with a clear message instead of
 misbehaving later.
 
 Example:
-    >>> from backend.config import load_settings
+    >>> from config import load_settings
     >>> load_settings({"IS_PROD": "false", ...}).api_port
     8000
 """
 
 import logging
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,13 +35,37 @@ from dotenv import load_dotenv
 # backend/config.py -> backend/.env, wherever Python is started from.
 ENV_PATH = Path(__file__).resolve().parent / ".env"
 
-# Environment variable names, in one place so code and docs agree.
+# Required environment variable names, in one place so code and docs agree.
 IS_PROD = "IS_PROD"
 PRODUCTION_SITE_URL = "PRODUCTION_SITE_URL"
 DEV_CORS_ORIGINS = "DEV_CORS_ORIGINS"
 API_HOST = "API_HOST"
 API_PORT = "API_PORT"
 LOG_LEVEL = "LOG_LEVEL"
+DATABASE_PATH = "DATABASE_PATH"
+FRONTEND_DIR = "FRONTEND_DIR"
+DEV_MODE = "DEV_MODE"
+JETSTREAM_ENABLED = "JETSTREAM_ENABLED"
+
+# Optional environment variable names (a default is used when unset).
+JETSTREAM_URL = "JETSTREAM_URL"
+ICAL_FEED_URLS = "ICAL_FEED_URLS"
+ICAL_INTERVAL_SECONDS = "ICAL_INTERVAL_SECONDS"
+EXPIRY_INTERVAL_SECONDS = "EXPIRY_INTERVAL_SECONDS"
+EXPIRY_GRACE_SECONDS = "EXPIRY_GRACE_SECONDS"
+EXPIRY_PURGE_DAYS = "EXPIRY_PURGE_DAYS"
+
+# Defaults for the optional variables.
+DEFAULT_JETSTREAM_URL = "wss://jetstream2.us-east.bsky.network/subscribe"
+DEFAULT_ICAL_INTERVAL_SECONDS = 900
+DEFAULT_EXPIRY_INTERVAL_SECONDS = 60
+# 0 hides an event the moment it ends; raise it to keep ended events visible.
+DEFAULT_EXPIRY_GRACE_SECONDS = 0
+DEFAULT_EXPIRY_PURGE_DAYS = 7
+
+# Smallest accepted values: a 0-second polling interval would spin the CPU.
+_MIN_INTERVAL_SECONDS = 1
+_MIN_NON_NEGATIVE = 0
 
 # Accepted spellings for boolean variables.
 _TRUE_VALUES = {"true", "1", "yes"}
@@ -43,22 +74,41 @@ _FALSE_VALUES = {"false", "0", "no"}
 # The CORS wildcard: any origin may call the API (development only).
 ANY_ORIGIN = "*"
 
+# No cross-origin callers: only pages served by this backend may call it.
+SAME_ORIGIN_ONLY: tuple[str, ...] = ()
+
+# URL schemes accepted for web origins / iCal feeds and for Jetstream.
+_HTTP_SCHEMES = {"http", "https"}
+_WEBSOCKET_SCHEMES = {"ws", "wss"}
+
+# Separator for list-valued variables such as DEV_CORS_ORIGINS.
+_LIST_SEPARATOR = ","
+
 # Valid TCP port range.
 _MIN_PORT = 1
 _MAX_PORT = 65535
 
 # logging level names accepted for LOG_LEVEL.
 _LOG_LEVELS = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"}
+_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+_LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
 class ConfigError(ValueError):
-    """Raised when one or more environment variables are missing or invalid.
+    """
+    Raised when one or more environment variables are missing or invalid.
 
     Attributes:
         problems: one human-readable message per bad variable.
     """
 
     def __init__(self, problems: list[str]):
+        """
+        Build the error message from every recorded problem.
+
+        Args:
+            problems: one human-readable message per bad variable.
+        """
         self.problems = problems
         details = "\n  - ".join(problems)
         super().__init__(
@@ -69,14 +119,28 @@ class ConfigError(ValueError):
 
 @dataclass(frozen=True)
 class Settings:
-    """Validated backend settings.
+    """
+    Validated backend settings.
 
     Attributes:
         is_prod: True when running in production.
-        cors_allowed_origins: origins allowed to call the API.
+        cors_allowed_origins: origins allowed to call the API; empty means
+            same-origin only (no cross-origin callers).
         api_host: interface uvicorn binds to, e.g. "127.0.0.1".
         api_port: TCP port uvicorn listens on.
         log_level: logging level name, e.g. "INFO".
+        database_path: SQLite file path, or ":memory:" for tests.
+        frontend_dir: folder of static frontend files served at "/".
+        dev_mode: True exposes POST /api/dev/records, which simulates
+            firehose commits locally (demo mode).
+        jetstream_enabled: True indexes live records from Jetstream;
+            False indexes only via dev mode and iCal imports.
+        jetstream_url: Jetstream WebSocket endpoint (ws:// or wss://).
+        ical_feed_urls: iCal feed URLs polled in the background.
+        ical_interval_seconds: seconds between iCal polling rounds.
+        expiry_interval_seconds: seconds between expiry sweeps.
+        expiry_grace_seconds: seconds an event stays visible after it ends.
+        expiry_purge_days: days an expired event is kept before deletion.
     """
 
     is_prod: bool
@@ -84,10 +148,21 @@ class Settings:
     api_host: str
     api_port: int
     log_level: str
+    database_path: str
+    frontend_dir: str
+    dev_mode: bool
+    jetstream_enabled: bool
+    jetstream_url: str
+    ical_feed_urls: list[str]
+    ical_interval_seconds: int
+    expiry_interval_seconds: int
+    expiry_grace_seconds: int
+    expiry_purge_days: int
 
 
 def load_env_file(path: Path = ENV_PATH) -> bool:
-    """Load variables from a .env file into os.environ.
+    """
+    Load variables from a .env file into os.environ.
 
     Variables that are already set are left alone (override=False), so the
     real environment always wins over the file.
@@ -101,13 +176,29 @@ def load_env_file(path: Path = ENV_PATH) -> bool:
     return load_dotenv(path, override=False)
 
 
-def _require(environ: Mapping[str, str], name: str, problems: list[str]):
-    """Return a variable's trimmed value, or record a problem and None."""
+def _optional(environ: Mapping[str, str], name: str) -> str | None:
+    """
+    Return a variable's trimmed value, or None when unset or blank.
+
+    Args:
+        environ: where to read variables from.
+        name: the variable to read.
+
+    Returns:
+        The trimmed value, or None if the variable is missing or blank.
+    """
     value = environ.get(name)
     if value is None or value.strip() == "":
-        problems.append(f"{name} is required")
         return None
     return value.strip()
+
+
+def _require(environ: Mapping[str, str], name: str, problems: list[str]):
+    """Return a variable's trimmed value, or record a problem and None."""
+    value = _optional(environ, name)
+    if value is None:
+        problems.append(f"{name} is required")
+    return value
 
 
 def _parse_bool(environ, name, problems) -> bool | None:
@@ -123,10 +214,25 @@ def _parse_bool(environ, name, problems) -> bool | None:
     return None
 
 
-def _is_http_origin(value: str) -> bool:
-    """True for an http(s) origin such as "https://events.example.edu"."""
+def _has_scheme_and_host(value: str, allowed_schemes: set[str]) -> bool:
+    """
+    True when value is a URL with one of allowed_schemes and a host.
+
+    Args:
+        value: the candidate URL, e.g. "https://events.example.edu".
+        allowed_schemes: accepted schemes, e.g. {"http", "https"}.
+
+    Returns:
+        Whether the scheme is allowed and a host is present.
+    """
     parsed = urlparse(value)
-    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+    return parsed.scheme in allowed_schemes and bool(parsed.netloc)
+
+
+def _split_list(value: str) -> list[str]:
+    """Split a comma-separated value into trimmed, non-empty parts."""
+    parts = value.split(_LIST_SEPARATOR)
+    return [part.strip() for part in parts if part.strip()]
 
 
 def _parse_origins(environ, name, problems) -> list[str] | None:
@@ -134,11 +240,13 @@ def _parse_origins(environ, name, problems) -> list[str] | None:
     value = _require(environ, name, problems)
     if value is None:
         return None
-    origins = [part.strip() for part in value.split(",") if part.strip()]
+    origins = _split_list(value)
     if origins == [ANY_ORIGIN]:
         return origins
     invalid_origins = [
-        origin for origin in origins if not _is_http_origin(origin)
+        origin
+        for origin in origins
+        if not _has_scheme_and_host(origin, _HTTP_SCHEMES)
     ]
     if invalid_origins or not origins:
         problems.append(
@@ -175,11 +283,82 @@ def _parse_log_level(environ, name, problems) -> str | None:
     return value.upper()
 
 
+def _parse_optional_integer(
+    environ: Mapping[str, str],
+    name: str,
+    problems: list[str],
+    default: int,
+    minimum: int,
+) -> int | None:
+    """
+    Parse an optional whole number that must be at least minimum.
+
+    Args:
+        environ: where to read variables from.
+        name: the variable to read.
+        problems: list that collects one message per bad variable.
+        default: value used when the variable is unset or blank.
+        minimum: smallest accepted value.
+
+    Returns:
+        The parsed number, the default, or None after recording a problem.
+    """
+    value = _optional(environ, name)
+    if value is None:
+        return default
+    if not value.isdigit() or int(value) < minimum:
+        problems.append(
+            f"{name} must be a whole number of at least {minimum}, "
+            f"got {value!r}"
+        )
+        return None
+    return int(value)
+
+
+def _parse_optional_jetstream_url(environ, name, problems) -> str | None:
+    """Parse the optional Jetstream WebSocket URL (ws:// or wss://)."""
+    value = _optional(environ, name)
+    if value is None:
+        return DEFAULT_JETSTREAM_URL
+    if not _has_scheme_and_host(value, _WEBSOCKET_SCHEMES):
+        problems.append(f"{name} must be a ws(s):// URL, got {value!r}")
+        return None
+    return value
+
+
+def _parse_optional_feed_urls(environ, name, problems) -> list[str] | None:
+    """Parse an optional comma-separated list of http(s) iCal feed URLs."""
+    value = _optional(environ, name)
+    if value is None:
+        return []
+    feed_urls = _split_list(value)
+    invalid_feed_urls = [
+        feed_url
+        for feed_url in feed_urls
+        if not _has_scheme_and_host(feed_url, _HTTP_SCHEMES)
+    ]
+    if invalid_feed_urls:
+        problems.append(
+            f"{name} must be comma-separated http(s) URLs, "
+            f"got {', '.join(invalid_feed_urls)!r}"
+        )
+        return None
+    return feed_urls
+
+
 def _cors_origins(environ, is_prod, problems) -> list[str] | None:
-    """Production allows only PRODUCTION_SITE_URL; development uses
-    DEV_CORS_ORIGINS (often "*"). The wildcard is refused in production."""
+    """
+    Production allows only PRODUCTION_SITE_URL; development uses
+    DEV_CORS_ORIGINS (often "*"). The wildcard is refused in production.
+
+    PRODUCTION_SITE_URL is optional: when unset, no other origin may call
+    the API (SAME_ORIGIN_ONLY). The frontend this server hosts itself is
+    same-origin, so it keeps working without any CORS origin.
+    """
     if is_prod is None:
         return None
+    if is_prod and _optional(environ, PRODUCTION_SITE_URL) is None:
+        return list(SAME_ORIGIN_ONLY)
     name = PRODUCTION_SITE_URL if is_prod else DEV_CORS_ORIGINS
     origins = _parse_origins(environ, name, problems)
     if is_prod and origins == [ANY_ORIGIN]:
@@ -188,8 +367,71 @@ def _cors_origins(environ, is_prod, problems) -> list[str] | None:
     return origins
 
 
+def _server_settings(environ, problems) -> dict[str, object]:
+    """Parse the settings for the web server itself (CORS, host, logs)."""
+    is_prod = _parse_bool(environ, IS_PROD, problems)
+    return {
+        "is_prod": is_prod,
+        "cors_allowed_origins": _cors_origins(environ, is_prod, problems),
+        "api_host": _require(environ, API_HOST, problems),
+        "api_port": _parse_port(environ, API_PORT, problems),
+        "log_level": _parse_log_level(environ, LOG_LEVEL, problems),
+        "database_path": _require(environ, DATABASE_PATH, problems),
+        "frontend_dir": _require(environ, FRONTEND_DIR, problems),
+        "dev_mode": _parse_bool(environ, DEV_MODE, problems),
+    }
+
+
+def _ingest_settings(environ, problems) -> dict[str, object]:
+    """Parse the settings for Jetstream and iCal ingestion."""
+    return {
+        "jetstream_enabled": _parse_bool(environ, JETSTREAM_ENABLED, problems),
+        "jetstream_url": _parse_optional_jetstream_url(
+            environ, JETSTREAM_URL, problems
+        ),
+        "ical_feed_urls": _parse_optional_feed_urls(
+            environ, ICAL_FEED_URLS, problems
+        ),
+        "ical_interval_seconds": _parse_optional_integer(
+            environ,
+            ICAL_INTERVAL_SECONDS,
+            problems,
+            DEFAULT_ICAL_INTERVAL_SECONDS,
+            _MIN_INTERVAL_SECONDS,
+        ),
+    }
+
+
+def _expiry_settings(environ, problems) -> dict[str, object]:
+    """Parse the settings for the background expiry sweep."""
+    return {
+        "expiry_interval_seconds": _parse_optional_integer(
+            environ,
+            EXPIRY_INTERVAL_SECONDS,
+            problems,
+            DEFAULT_EXPIRY_INTERVAL_SECONDS,
+            _MIN_INTERVAL_SECONDS,
+        ),
+        "expiry_grace_seconds": _parse_optional_integer(
+            environ,
+            EXPIRY_GRACE_SECONDS,
+            problems,
+            DEFAULT_EXPIRY_GRACE_SECONDS,
+            _MIN_NON_NEGATIVE,
+        ),
+        "expiry_purge_days": _parse_optional_integer(
+            environ,
+            EXPIRY_PURGE_DAYS,
+            problems,
+            DEFAULT_EXPIRY_PURGE_DAYS,
+            _MIN_NON_NEGATIVE,
+        ),
+    }
+
+
 def load_settings(environ: Mapping[str, str]) -> Settings:
-    """Read and validate every backend setting.
+    """
+    Read and validate every backend setting.
 
     Args:
         environ: where to read variables from, usually os.environ (after
@@ -202,23 +444,42 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
         ConfigError: listing every missing or invalid variable.
     """
     problems: list[str] = []
-    is_prod = _parse_bool(environ, IS_PROD, problems)
     settings = {
-        "is_prod": is_prod,
-        "cors_allowed_origins": _cors_origins(environ, is_prod, problems),
-        "api_host": _require(environ, API_HOST, problems),
-        "api_port": _parse_port(environ, API_PORT, problems),
-        "log_level": _parse_log_level(environ, LOG_LEVEL, problems),
+        **_server_settings(environ, problems),
+        **_ingest_settings(environ, problems),
+        **_expiry_settings(environ, problems),
     }
     if problems:
         raise ConfigError(problems)
     return Settings(**settings)
 
 
+def load_settings_from_environment(env_path: Path = ENV_PATH) -> Settings:
+    """
+    Load backend/.env into os.environ, then read and validate settings.
+
+    Args:
+        env_path: the .env file to read; a missing file is not an error.
+
+    Returns:
+        The validated Settings.
+
+    Raises:
+        ConfigError: listing every missing or invalid variable.
+    """
+    load_env_file(env_path)
+    return load_settings(os.environ)
+
+
 def configure_logging(settings: Settings) -> None:
-    """Set up the root logger at the configured level."""
+    """
+    Set up the root logger at the configured level.
+
+    Args:
+        settings: the validated settings; only log_level is used.
+    """
     logging.basicConfig(
         level=settings.log_level,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+        format=_LOG_FORMAT,
+        datefmt=_LOG_DATE_FORMAT,
     )

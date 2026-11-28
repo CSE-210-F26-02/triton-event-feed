@@ -1,4 +1,5 @@
-"""Validator for app.communitymap.subscription records.
+"""
+Validator for app.communitymap.subscription records.
 
 The schema lives in lexicons/app/communitymap/subscription.json at the repo
 root. A subscription is stored on the subscriber's own PDS and points at the
@@ -11,7 +12,7 @@ The frontend has its own validator
 same example records in fixtures/subscription/, which keeps them in agreement.
 
 Example:
-    >>> from backend.lexicon import validate_subscription
+    >>> from lexicon import validate_subscription
     >>> validate_subscription({"$type": "app.communitymap.subscription"})
     ['subject is required', 'createdAt is required']
 """
@@ -45,7 +46,8 @@ _RECORD_URI_RE = re.compile(r"^at://([^/]+)/([^/]+)/([^/?#]+)$")
 
 
 def _check_subject_uri(subject_uri: Any) -> list[str]:
-    """Check that subject.uri is an at:// URI of an event record.
+    """
+    Check that subject.uri is an at:// URI of an event record.
 
     A rule the lexicon language can't express: the strongRef must point at an
     app.communitymap.event, not at any other kind of record.
@@ -77,7 +79,8 @@ def _check_subject(subject: Any) -> list[str]:
 
 
 def validate_subscription(record: Any) -> list[str]:
-    """Check an app.communitymap.subscription record.
+    """
+    Check an app.communitymap.subscription record.
 
     Args:
         record: the subscription as a dict (e.g. parsed JSON from a PDS).
