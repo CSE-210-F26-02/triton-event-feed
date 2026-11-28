@@ -9,7 +9,7 @@
  * simply fails to connect and retries with backoff, which is harmless.
  * @module notifications
  */
-import { getStorage, storageGet, storageSet } from "./util.js";
+import { getStorage, runInBackground, storageGet, storageSet } from "./util.js";
 
 /** Prefix of the per-subscriber "last notification id seen" storage key. */
 const LAST_KEY_PREFIX = "cm:last-notification-id";
@@ -66,7 +66,7 @@ export function backoffMs(
  * @returns {number|null}
  */
 function parseLastId(value) {
-  const parsedNumber = value == null ? NaN : Number(value);
+  const parsedNumber = value == null ? Number.NaN : Number(value);
   return Number.isFinite(parsedNumber) ? parsedNumber : null;
 }
 
@@ -155,7 +155,7 @@ export function createNotifications({
     eventSource = new EventSourceImpl(api.notificationStreamUrl(subscriberId));
     eventSource.onopen = () => {
       attempts = 0;
-      catchUp();
+      runInBackground(catchUp(), "Catching up on notifications");
     };
     eventSource.onmessage = (event) => {
       try {

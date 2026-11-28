@@ -119,4 +119,5 @@ def list_tags(request: Request, store: Store, settings: SettingsDep) -> Response
 @router.get("/groups")
 def list_groups(request: Request, store: Store, settings: SettingsDep) -> Response:
     cutoff = _visible_cutoff(datetime.now(UTC), settings)
-    return _cached_json(request, [c.model_dump() for c in store.list_groups(cutoff)])
+    groups = store.list_groups(cutoff)
+    return _cached_json(request, [c.model_dump() for c in groups])

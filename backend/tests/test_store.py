@@ -255,4 +255,5 @@ def test_query_bbox_and_antimeridian(store, make_event, now):
     assert uris(store.query_events(EventQuery(bbox=campus), now)) == ["ucsd"]
 
     dateline = BoundingBox(west=175.0, south=-20.0, east=-175.0, north=-15.0)
-    assert set(uris(store.query_events(EventQuery(bbox=dateline), now))) == {"fiji_e", "fiji_w"}
+    dateline_events = store.query_events(EventQuery(bbox=dateline), now)
+    assert set(uris(dateline_events)) == {"fiji_e", "fiji_w"}

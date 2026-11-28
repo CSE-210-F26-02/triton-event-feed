@@ -159,7 +159,7 @@ def test_event_uri_is_stable_across_releases():
 
 
 def test_event_uri_differs_per_feed_and_uid():
-    """The same UID in two feeds, or two UIDs in one feed, get distinct URIs."""
+    """The same UID in two feeds, or two UIDs in one feed, differ."""
     uris = {
         event_uri("https://a.example/x.ics", "1@a"),
         event_uri("https://b.example/x.ics", "1@a"),

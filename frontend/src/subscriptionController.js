@@ -11,6 +11,7 @@
  * @module subscriptionController
  */
 import { SubscriptionError } from "./subscriptions.js";
+import { runInBackground } from "./util.js";
 
 export const LOGIN_TO_SUBSCRIBE_REASON = "Log in to subscribe to this event.";
 export const SUBSCRIBED_TOAST =
@@ -52,7 +53,11 @@ async function attemptChange(dependencies, change) {
   try {
     const subscribed = await change();
     dependencies.toast(subscribed ? SUBSCRIBED_TOAST : UNSUBSCRIBED_TOAST);
-    if (subscribed) dependencies.notifications?.askPermissionOnce();
+    if (subscribed && dependencies.notifications)
+      runInBackground(
+        dependencies.notifications.askPermissionOnce(),
+        "Asking for notification permission",
+      );
     return subscribed;
   } catch (error) {
     dependencies.toast(subscriptionErrorMessage(error), { kind: "error" });

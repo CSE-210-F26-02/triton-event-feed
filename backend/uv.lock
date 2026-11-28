@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.12"
 
 [[package]]
@@ -704,7 +704,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "dotenv", specifier = ">=0.9.9" },
-    { name = "fastapi", specifier = ">=0.163.1" },
+    { name = "fastapi", specifier = "==0.163.1" },
     { name = "httpx", specifier = "==0.28.1" },
     { name = "icalendar", specifier = "==7.3.0" },
     { name = "pydantic", specifier = "==2.14.3" },
@@ -716,7 +716,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "pytest", specifier = ">=9.2.0" },
+    { name = "pytest", specifier = "==9.2.0" },
     { name = "pytest-asyncio", specifier = "==1.4.1.post1" },
     { name = "ruff", specifier = "==0.17.4" },
 ]
