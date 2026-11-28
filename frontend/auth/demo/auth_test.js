@@ -25,7 +25,7 @@ auth.onInvalidUserInfo = () => {
 };
 
 // Setup header toggles for when login is successful.
-auth.onSuccessfulLogin = () => {
+auth.onSuccessfulLogin = async () => {
     document.getElementById("fail-header").style.display = "none";
     document.getElementById("invalid-user-header").style.display = "none";
     document.getElementById("logout-header").style.display = "none";

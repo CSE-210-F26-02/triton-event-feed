@@ -69,27 +69,42 @@ class AuthProvider
     }
 
     /**
-     * Attempts to resume a session if one already exists. Also handles failed OAuth logins
-     * Starts by checking for password sessions.
-     * Otherwise, initializes the OAuth Client, which may recover an OAuth session. 
+     * Attempts to resume a session if one already exists. Also handles failed OAuth logins.
+     * Initializes the OAuth Client, which may recover an OAuth session. If no existing OAuth session is found, attempts to find an existing password session.
      * Should be called exactly once before login if OAuth-based authentication is desired.
      * 
      * @returns True if the initialization successfully recovered an existing session, false otherwise (should call login to get a session if false)
      */
     async init() {
+        // Initialize OAuth, and try to recover existing OAuth session.
+        // Note that oAuthInit should always be called, while passwordInit doesn't need to be called.
+        if (await this.oAuthInit())
+            return true;
+
+        // Attempt to recover password session
+        if (await this.passwordInit())
+            return true;
+    
+        return false;
+    }
+
+    async oAuthInit() {
+        //OAuth Init
+
         // Apparently possible to avoid trip to fetch metadata document, see top link
         this.#oAuthClient = await BrowserOAuthClient.load({
             clientId: this.#clientID,
             handleResolver: HandleResolver,
         });
 
-        // TODO: Handles session invalidation
+        // TODO: example provided by atproto demo seems to be broken, and hooking into onSessionDeleted would replace the existing implementation in BrowserOAuth
         // Based on snippet from https://www.npmjs.com/package/@atproto/oauth-client-browser
-        /* this.#oAuthClient.addEventListener('deleted', ( event ) => {
+        /*this.#oAuthClient.addEventListener('deleted', ( event ) => {
             this.invalidateSession();
             const { sub, cause } = event.detail;
             console.error(`Session for ${sub} is no longer available (cause: ${cause})`);
         });*/
+
         var oAuthResult;
         try {
             oAuthResult = await this.#oAuthClient.init();
@@ -122,11 +137,39 @@ class AuthProvider
         }
     }
 
+    async passwordInit() {
+        // Based on https://github.com/bluesky-social/atproto/tree/main/packages/lex/lex-password-session
+        // Try to load session from storage
+        const pwSavedSession = localStorage.getItem('session');
+        if (pwSavedSession) {
+            const savedSession = JSON.parse(pwSavedSession);
+
+            // Resume the session (automatically refreshes tokens)
+            this.#session = await PasswordSession.resume(savedSession, {
+                onUpdated: (data) => {
+                    localStorage.setItem('session', JSON.stringify(data));
+                },
+                onDeleted: () => {
+                    localStorage.removeItem('session');
+                },
+            });
+
+            this.#client = new Client(this.#session);
+            this.onSuccessfulLogin();
+            return true;
+        }
+
+        return false;
+    }
+
     /**
      * Unified function to log the user in, using either password or OAuth. 
      * If a password is provided, attempts to use password authentication.
      */
     async login(handle, password=null) {
+        if (this.isSessionValid())
+            return; // Already logged in.
+
         if (password) {
             await this.loginPassword(handle, password);
         } else {
@@ -175,11 +218,11 @@ class AuthProvider
                 identifier: handle,
                 password: password,
                 onUpdated: (data) => {
-                    // Persist session for later restoration
-                    localStorage.setItem('session', JSON.stringify(data))
+                    // Persist session for later restoration, not used for now.
+                    localStorage.setItem('session', JSON.stringify(data));
                 },
                 onDeleted: () => {
-                    localStorage.removeItem('session')
+                    localStorage.removeItem('session');
                 },
             });
 
@@ -220,7 +263,8 @@ class AuthProvider
     }
 
     isSessionValid() {
-        return this.#session !== null && this.#client !== null;
+        // Might be a better pattern for this, but wanted boolean outputs rather than null/object
+        return (this.#session && this.#client) ? true : false;
     }
 
     /**
@@ -237,7 +281,6 @@ class AuthProvider
  * @returns A URL (string) representing the Client ID for an authorization request.
  */
 function buildClientID() {
-
     if (isLocal()) {
         return `http://localhost?${new URLSearchParams({
             // Specifies all permissions we may need from this authorization.
