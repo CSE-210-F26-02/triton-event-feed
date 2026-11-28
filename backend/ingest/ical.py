@@ -12,7 +12,7 @@ from datetime import UTC, date, datetime, timedelta
 from urllib.parse import urlsplit
 
 import httpx
-from icalendar import Calendar, Component
+from icalendar import Calendar, Event
 from pydantic import ValidationError
 
 from config import Settings
@@ -90,14 +90,23 @@ def _to_utc(value: date | datetime) -> datetime:
     return datetime(value.year, value.month, value.day, tzinfo=UTC)
 
 
-def _start_and_end(vevent: Component) -> tuple[datetime, datetime]:
-    """Return (start, end), inventing an end when the feed omits it."""
-    raw_start = vevent["DTSTART"].dt
+def _start_and_end(vevent: Event) -> tuple[datetime, datetime]:
+    """
+    Return (start, end), inventing an end when the feed omits it.
+
+    :param vevent: one event from the feed.
+    :returns: the start and end, in UTC.
+    :raises ValueError: when the VEVENT has no DTSTART.
+    """
+    raw_start = vevent.DTSTART
+    if raw_start is None:
+        raise ValueError("VEVENT without DTSTART")
     starts_at = _to_utc(raw_start)
-    if "DTEND" in vevent:
-        ends_at = _to_utc(vevent["DTEND"].dt)
-    elif "DURATION" in vevent:
-        ends_at = starts_at + vevent["DURATION"].dt
+    raw_end, duration = vevent.DTEND, vevent.DURATION
+    if raw_end is not None:
+        ends_at = _to_utc(raw_end)
+    elif duration is not None:
+        ends_at = starts_at + duration
     elif isinstance(raw_start, datetime):
         ends_at = starts_at + DEFAULT_DURATION
     else:
@@ -106,7 +115,7 @@ def _start_and_end(vevent: Component) -> tuple[datetime, datetime]:
 
 
 def _text_property(
-    vevent: Component, property_name: str, max_length: int
+    vevent: Event, property_name: str, max_length: int
 ) -> str | None:
     """Return a trimmed, truncated text property, or None if blank."""
     value = vevent.get(property_name)
@@ -115,7 +124,7 @@ def _text_property(
     return str(value).strip()[:max_length] or None
 
 
-def _location(vevent: Component) -> Location:
+def _location(vevent: Event) -> Location:
     """Build the event's Location from LOCATION and GEO."""
     name = _text_property(vevent, "LOCATION", MAX_NAME_LENGTH) or NO_LOCATION
     geo_coordinates = vevent.get("GEO")
@@ -128,7 +137,7 @@ def _location(vevent: Component) -> Location:
     )
 
 
-def _event_record(vevent: Component, now: datetime) -> EventRecord:
+def _event_record(vevent: Event, now: datetime) -> EventRecord:
     """
     Build the lexicon record for one VEVENT.
 
@@ -151,7 +160,7 @@ def _event_record(vevent: Component, now: datetime) -> EventRecord:
 
 
 def _indexed_event(
-    vevent: Component, feed_url: str, author: str, now: datetime
+    vevent: Event, feed_url: str, author: str, now: datetime
 ) -> IndexedEvent | None:
     """
     Build the indexed event for one VEVENT, or None if it has ended.
@@ -189,6 +198,8 @@ def parse_ics(text: str, feed_url: str, now: datetime) -> list[IndexedEvent]:
     author = ICAL_AUTHOR_PREFIX + host
     events: list[IndexedEvent] = []
     for vevent in calendar.walk("VEVENT"):
+        if not isinstance(vevent, Event):
+            continue  # walk("VEVENT") only yields Events; this tells the types
         try:
             event = _indexed_event(vevent, feed_url, author, now)
         except MALFORMED_VEVENT_ERRORS as error:

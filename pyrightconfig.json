@@ -1,0 +1,23 @@
+// Type checking for the Python backend. VS Code's Pylance and the `pyright` CI
+// step both read this file, so the editor and CI report the same problems. It
+// lives at the repo root because that is the folder VS Code opens.
+{
+  "include": ["backend"],
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.*",
+    "backend/data",
+    "backend/*.egg-info"
+  ],
+  // backend/ is the import root, so bare imports such as
+  // `from store.base import EventStore` resolve as they do at runtime.
+  "executionEnvironments": [{ "root": "backend" }],
+  // backend/.venv is used when it exists (local development); otherwise, as
+  // in CI, pyright uses the packages of the `python` on PATH.
+  "venvPath": "backend",
+  "venv": ".venv",
+  "pythonVersion": "3.12",
+  // Pylance's own default ("off") hides real bugs; "standard" is pyright's.
+  "typeCheckingMode": "standard"
+}

@@ -78,16 +78,17 @@ def parse_commit(message: dict[str, Any]) -> Commit | None:
     """
     Extract the commit from a Jetstream message.
 
-    :param msg: a decoded Jetstream message.
-    :returns: The commit, or None if msg is not a usable commit.
+    :param message: a decoded Jetstream message.
+    :returns: The commit, or None if message is not a usable commit.
     """
     body = message.get("commit")
     if message.get("kind") != "commit" or not isinstance(body, dict):
         return None
-    did, operation = message.get("did"), body.get("operation")
-    collection, rkey = body.get("collection"), body.get("rkey")
-    required = (did, operation, collection, rkey)
-    if not all(isinstance(value, str) and value for value in required):
+    did = _non_empty_text(message.get("did"))
+    operation = _non_empty_text(body.get("operation"))
+    collection = _non_empty_text(body.get("collection"))
+    rkey = _non_empty_text(body.get("rkey"))
+    if did is None or operation is None or collection is None or rkey is None:
         return None
     record = body.get("record")
     return Commit(
@@ -95,9 +96,19 @@ def parse_commit(message: dict[str, Any]) -> Commit | None:
         operation,
         collection,
         rkey,
-        body.get("cid"),
+        _non_empty_text(body.get("cid")),
         record if isinstance(record, dict) else None,
     )
+
+
+def _non_empty_text(value: object) -> str | None:
+    """
+    Return value when it is a non-empty string, else None.
+
+    :param value: one field of an untrusted Jetstream message.
+    :returns: the string, or None for anything else (missing, "", 42, ...).
+    """
+    return value if isinstance(value, str) and value else None
 
 
 # ---- diffs ------------------------------------------------------------------

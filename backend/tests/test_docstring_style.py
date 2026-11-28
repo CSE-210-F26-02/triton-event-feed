@@ -34,6 +34,9 @@ PREFERRED_FIELD = {
 }
 NON_STANDARD_FIELD = re.compile(r"^\s*:(" + "|".join(PREFERRED_FIELD) + r")\b")
 
+# A ":param name:" field; group 1 is the documented parameter name.
+PARAM_FIELD = re.compile(r"^\s*:param (\w+):", re.MULTILINE)
+
 # Nodes that can carry a docstring.
 DOCUMENTED_NODES = (
     ast.Module,
@@ -75,6 +78,75 @@ def style_problems(docstring):
                 f'":{field}:" field: spell it ":{PREFERRED_FIELD[field]}:"'
             )
     return problems
+
+
+def parameter_names(function):
+    """
+    Every parameter a function declares, including *args and **kwargs.
+
+    :param function: a parsed function definition.
+    :returns: the parameter names.
+    """
+    arguments = function.args
+    names = {
+        argument.arg
+        for argument in arguments.posonlyargs
+        + arguments.args
+        + arguments.kwonlyargs
+    }
+    for variadic in (arguments.vararg, arguments.kwarg):
+        if variadic is not None:
+            names.add(variadic.arg)
+    return names
+
+
+def stale_param_names(function):
+    """
+    Names in ":param name:" fields that the function does not declare.
+
+    A parameter renamed in code but not in its docstring shows up here.
+
+    :param function: a parsed function definition.
+    :returns: the documented names that are not real parameters.
+    """
+    docstring = ast.get_docstring(function) or ""
+    real_names = parameter_names(function)
+    return [
+        name
+        for name in PARAM_FIELD.findall(docstring)
+        if name not in real_names
+    ]
+
+
+def test_every_param_field_names_a_real_parameter():
+    offenders = []
+    for path in backend_python_files():
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        relative_path = path.relative_to(BACKEND_DIR)
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                offenders += [
+                    f"{relative_path}:{node.lineno} {node.name}() has no "
+                    f"parameter {name!r}"
+                    for name in stale_param_names(node)
+                ]
+    assert offenders == [], "Fix :param names:\n" + "\n".join(offenders)
+
+
+def test_detects_stale_param_names():
+    function = ast.parse(
+        'def resolve(did_document):\n    """\n    Summary.\n\n'
+        '    :param doc: the document.\n    """\n'
+    ).body[0]
+    assert stale_param_names(function) == ["doc"]
+
+
+def test_accepts_variadic_param_names():
+    function = ast.parse(
+        'def build(**overrides):\n    """\n    Summary.\n\n'
+        '    :param overrides: field values.\n    """\n'
+    ).body[0]
+    assert stale_param_names(function) == []
 
 
 def test_every_docstring_uses_rest_fields():

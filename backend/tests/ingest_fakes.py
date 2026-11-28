@@ -1,22 +1,43 @@
 """
 In-memory fakes of the EventStore / Notifier Protocols used by the
 ingest tests.
+
+FakeStore implements every EventStore method, so the type checker accepts it
+wherever an EventStore is expected. Queries the ingest code never makes
+(paging, tag counts, ...) raise NotImplementedError: tests that need them use
+the real SqliteStore(":memory:") from conftest.py instead.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from models import EventUpdate, IndexedEvent, Listener, NotificationKind
+from models import (
+    Count,
+    EventQuery,
+    EventUpdate,
+    IndexedEvent,
+    Listener,
+    Notification,
+    NotificationKind,
+    Page,
+)
 from store.base import UpsertResult
+
+NOT_USED_BY_INGEST = "not used by the ingest code; use SqliteStore"
 
 
 class FakeStore:
+    """In-memory EventStore for the ingest tests."""
+
     def __init__(self) -> None:
+        """Start with no events, listeners, subscriptions or cursors."""
         self.events: dict[str, IndexedEvent] = {}
         self.updates: list[EventUpdate] = []
         self.listeners: dict[str, Listener] = {}
         self.cursors: dict[str, int] = {}
+        self.subscriptions: set[tuple[str, str]] = set()
+        self.notifications: list[Notification] = []
 
     # events
     def upsert_event(self, event: IndexedEvent) -> UpsertResult:
@@ -59,6 +80,58 @@ class FakeStore:
         return sorted(
             {listener.author_did for listener in self.listeners.values()}
         )
+
+    # queries (not used by the ingest code)
+    def query_events(self, query: EventQuery, now: datetime) -> Page:
+        raise NotImplementedError(NOT_USED_BY_INGEST)
+
+    def delete_expired(self, cutoff: datetime) -> list[str]:
+        raise NotImplementedError(NOT_USED_BY_INGEST)
+
+    def list_tags(self, now: datetime) -> list[Count]:
+        raise NotImplementedError(NOT_USED_BY_INGEST)
+
+    def list_groups(self, now: datetime) -> list[Count]:
+        raise NotImplementedError(NOT_USED_BY_INGEST)
+
+    # subscriptions
+    def subscribe(self, subscriber_id: str, event_uri: str) -> None:
+        self.subscriptions.add((subscriber_id, event_uri))
+
+    def unsubscribe(self, subscriber_id: str, event_uri: str) -> None:
+        self.subscriptions.discard((subscriber_id, event_uri))
+
+    def subscribers_of(self, event_uri: str) -> list[str]:
+        return sorted(
+            subscriber
+            for subscriber, subscribed_uri in self.subscriptions
+            if subscribed_uri == event_uri
+        )
+
+    def subscriptions_of(self, subscriber_id: str) -> list[str]:
+        return sorted(
+            subscribed_uri
+            for subscriber, subscribed_uri in self.subscriptions
+            if subscriber == subscriber_id
+        )
+
+    # notifications
+    def add_notification(self, notification: Notification) -> Notification:
+        stored = notification.model_copy(
+            update={"id": len(self.notifications) + 1}
+        )
+        self.notifications.append(stored)
+        return stored
+
+    def list_notifications(
+        self, subscriber_id: str, since_id: int = 0
+    ) -> list[Notification]:
+        return [
+            notification
+            for notification in self.notifications
+            if notification.subscriber_id == subscriber_id
+            and (notification.id or 0) > since_id
+        ]
 
     # cursors
     def get_cursor(self, name: str) -> int | None:

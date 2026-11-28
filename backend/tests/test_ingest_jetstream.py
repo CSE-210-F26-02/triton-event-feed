@@ -37,14 +37,16 @@ class FakeConnect:
     def __call__(self, url: str) -> Any:
         self.urls.append(url)
         script = self.scripts.pop(0) if self.scripts else []
+        connect_error = script if isinstance(script, Exception) else None
+        messages = [] if isinstance(script, Exception) else script
 
         @asynccontextmanager
         async def connection_context() -> AsyncIterator[AsyncIterator[str]]:
-            if isinstance(script, Exception):
-                raise script
+            if connect_error is not None:
+                raise connect_error
 
             async def message_stream() -> AsyncIterator[str]:
-                for message in script:
+                for message in messages:
                     yield message
 
             yield message_stream()

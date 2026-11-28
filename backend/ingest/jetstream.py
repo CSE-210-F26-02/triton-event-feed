@@ -17,7 +17,7 @@ import contextlib
 import json
 import logging
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterable, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from typing import Any
 from urllib.parse import urlencode
@@ -41,7 +41,8 @@ BACKOFF_CAP_SECONDS = 60.0
 CURSOR_SAVE_EVERY_MESSAGES = 100
 CURSOR_SAVE_INTERVAL_SECONDS = 5.0
 
-MessageStream = AbstractAsyncContextManager[AsyncIterator[str | bytes]]
+# A connection yields raw frames; websockets.connect() opens one.
+MessageStream = AbstractAsyncContextManager[AsyncIterable[str | bytes]]
 Connect = Callable[[str], MessageStream]
 Sleep = Callable[[float], Awaitable[None]]
 

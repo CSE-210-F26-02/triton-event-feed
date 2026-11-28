@@ -50,7 +50,8 @@ def handle_from_did_document(did_document: Any) -> str | None:
     """
     Return the first at:// alias in a DID document, without "at://".
 
-    :param doc: the decoded DID document (untrusted; may be malformed).
+    :param did_document: the decoded DID document (untrusted; may be
+        malformed).
     :returns: The handle, or None if the document has none.
     """
     aliases = (

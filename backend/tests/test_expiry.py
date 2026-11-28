@@ -1,7 +1,9 @@
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from expiry import run_expiry_loop, sweep_once
+from models import EventQuery, Page
+from tests.ingest_fakes import FakeStore
 from tests.settings_factory import make_test_settings
 
 
@@ -48,11 +50,16 @@ async def test_sweep_many_pages(store, notifier, make_event, now):
     assert len(await sweep_once(store, notifier, now, grace_seconds=0)) == 130
 
 
-class BoomStore:
+class BoomStore(FakeStore):
+    """A store whose every query fails, to prove the loop keeps going."""
+
     def __init__(self) -> None:
+        """Start counting query attempts."""
+        super().__init__()
         self.calls = 0
 
-    def query_events(self, query, now):
+    def query_events(self, query: EventQuery, now: datetime) -> Page:
+        """Count the attempt, then fail."""
         self.calls += 1
         raise RuntimeError("boom")
 

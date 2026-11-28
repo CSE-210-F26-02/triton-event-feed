@@ -35,6 +35,10 @@ from dotenv import load_dotenv
 # backend/config.py -> backend/.env, wherever Python is started from.
 ENV_PATH = Path(__file__).resolve().parent / ".env"
 
+# Where settings are read from: os.environ, or a plain dict in tests (values
+# from dotenv_values() may be None for a bare `NAME` line).
+Environ = Mapping[str, str | None]
+
 # Required environment variable names, in one place so code and docs agree.
 IS_PROD = "IS_PROD"
 PRODUCTION_SITE_URL = "PRODUCTION_SITE_URL"
@@ -170,7 +174,7 @@ def load_env_file(path: Path = ENV_PATH) -> bool:
     return load_dotenv(path, override=False)
 
 
-def _optional(environ: Mapping[str, str], name: str) -> str | None:
+def _optional(environ: Environ, name: str) -> str | None:
     """
     Return a variable's trimmed value, or None when unset or blank.
 
@@ -184,7 +188,7 @@ def _optional(environ: Mapping[str, str], name: str) -> str | None:
     return value.strip()
 
 
-def _require(environ: Mapping[str, str], name: str, problems: list[str]):
+def _require(environ: Environ, name: str, problems: list[str]) -> str | None:
     """Return a variable's trimmed value, or record a problem and None."""
     value = _optional(environ, name)
     if value is None:
@@ -192,7 +196,9 @@ def _require(environ: Mapping[str, str], name: str, problems: list[str]):
     return value
 
 
-def _parse_bool(environ, name, problems) -> bool | None:
+def _parse_bool(
+    environ: Environ, name: str, problems: list[str]
+) -> bool | None:
     """Parse a true/false variable (true/false, 1/0, yes/no; any case)."""
     value = _require(environ, name, problems)
     if value is None:
@@ -223,7 +229,9 @@ def _split_list(value: str) -> list[str]:
     return [part.strip() for part in parts if part.strip()]
 
 
-def _parse_origins(environ, name, problems) -> list[str] | None:
+def _parse_origins(
+    environ: Environ, name: str, problems: list[str]
+) -> list[str] | None:
     """Parse a comma-separated list of http(s) origins, or "*"."""
     value = _require(environ, name, problems)
     if value is None:
@@ -245,7 +253,9 @@ def _parse_origins(environ, name, problems) -> list[str] | None:
     return origins
 
 
-def _parse_port(environ, name, problems) -> int | None:
+def _parse_port(
+    environ: Environ, name: str, problems: list[str]
+) -> int | None:
     """Parse a TCP port number (1-65535)."""
     value = _require(environ, name, problems)
     if value is None:
@@ -259,7 +269,9 @@ def _parse_port(environ, name, problems) -> int | None:
     return int(value)
 
 
-def _parse_log_level(environ, name, problems) -> str | None:
+def _parse_log_level(
+    environ: Environ, name: str, problems: list[str]
+) -> str | None:
     """Parse a logging level name such as INFO (any case)."""
     value = _require(environ, name, problems)
     if value is None:
@@ -272,7 +284,7 @@ def _parse_log_level(environ, name, problems) -> str | None:
 
 
 def _parse_optional_integer(
-    environ: Mapping[str, str],
+    environ: Environ,
     name: str,
     problems: list[str],
     default: int,
@@ -301,7 +313,9 @@ def _parse_optional_integer(
     return int(value)
 
 
-def _parse_optional_jetstream_url(environ, name, problems) -> str | None:
+def _parse_optional_jetstream_url(
+    environ: Environ, name: str, problems: list[str]
+) -> str | None:
     """Parse the optional Jetstream WebSocket URL (ws:// or wss://)."""
     value = _optional(environ, name)
     if value is None:
@@ -312,7 +326,9 @@ def _parse_optional_jetstream_url(environ, name, problems) -> str | None:
     return value
 
 
-def _parse_optional_feed_urls(environ, name, problems) -> list[str] | None:
+def _parse_optional_feed_urls(
+    environ: Environ, name: str, problems: list[str]
+) -> list[str] | None:
     """Parse an optional comma-separated list of http(s) iCal feed URLs."""
     value = _optional(environ, name)
     if value is None:
@@ -332,7 +348,9 @@ def _parse_optional_feed_urls(environ, name, problems) -> list[str] | None:
     return feed_urls
 
 
-def _cors_origins(environ, is_prod, problems) -> list[str] | None:
+def _cors_origins(
+    environ: Environ, is_prod: bool | None, problems: list[str]
+) -> list[str] | None:
     """
     Production allows only PRODUCTION_SITE_URL; development uses
     DEV_CORS_ORIGINS (often "*"). The wildcard is refused in production.
@@ -353,7 +371,9 @@ def _cors_origins(environ, is_prod, problems) -> list[str] | None:
     return origins
 
 
-def _server_settings(environ, problems) -> dict[str, object]:
+def _server_settings(
+    environ: Environ, problems: list[str]
+) -> dict[str, object]:
     """Parse the settings for the web server itself (CORS, host, logs)."""
     is_prod = _parse_bool(environ, IS_PROD, problems)
     return {
@@ -368,7 +388,9 @@ def _server_settings(environ, problems) -> dict[str, object]:
     }
 
 
-def _ingest_settings(environ, problems) -> dict[str, object]:
+def _ingest_settings(
+    environ: Environ, problems: list[str]
+) -> dict[str, object]:
     """Parse the settings for Jetstream and iCal ingestion."""
     return {
         "jetstream_enabled": _parse_bool(environ, JETSTREAM_ENABLED, problems),
@@ -388,7 +410,9 @@ def _ingest_settings(environ, problems) -> dict[str, object]:
     }
 
 
-def _expiry_settings(environ, problems) -> dict[str, object]:
+def _expiry_settings(
+    environ: Environ, problems: list[str]
+) -> dict[str, object]:
     """Parse the settings for the background expiry sweep."""
     return {
         "expiry_interval_seconds": _parse_optional_integer(
@@ -415,7 +439,7 @@ def _expiry_settings(environ, problems) -> dict[str, object]:
     }
 
 
-def load_settings(environ: Mapping[str, str]) -> Settings:
+def load_settings(environ: Environ) -> Settings:
     """
     Read and validate every backend setting.
 
@@ -425,14 +449,68 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
     :raises ConfigError: listing every missing or invalid variable.
     """
     problems: list[str] = []
-    settings = {
+    values = {
         **_server_settings(environ, problems),
         **_ingest_settings(environ, problems),
         **_expiry_settings(environ, problems),
     }
     if problems:
         raise ConfigError(problems)
-    return Settings(**settings)
+    return _build_settings(values)
+
+
+def _typed_field[FieldType](
+    values: Mapping[str, object], name: str, expected_type: type[FieldType]
+) -> FieldType:
+    """
+    Return one parsed value, checking it has the type its field needs.
+
+    :param values: every parsed value, keyed by Settings field name.
+    :param name: the field to read.
+    :param expected_type: the type the field holds, e.g. bool or list.
+    :returns: the value, now known to be of expected_type.
+    :raises TypeError: when a parser returned the wrong type (a bug here,
+        not a configuration mistake).
+    """
+    value = values.get(name)
+    if not isinstance(value, expected_type):
+        raise TypeError(
+            f"setting {name} should be {expected_type.__name__}, "
+            f"got {type(value).__name__}"
+        )
+    return value
+
+
+def _build_settings(values: Mapping[str, object]) -> Settings:
+    """
+    Turn the parsed values (all valid, no problems recorded) into Settings.
+
+    :param values: every parsed value, keyed by Settings field name.
+    :returns: the validated Settings.
+    """
+    return Settings(
+        is_prod=_typed_field(values, "is_prod", bool),
+        cors_allowed_origins=_typed_field(
+            values, "cors_allowed_origins", list
+        ),
+        api_host=_typed_field(values, "api_host", str),
+        api_port=_typed_field(values, "api_port", int),
+        log_level=_typed_field(values, "log_level", str),
+        database_path=_typed_field(values, "database_path", str),
+        frontend_dir=_typed_field(values, "frontend_dir", str),
+        dev_mode=_typed_field(values, "dev_mode", bool),
+        jetstream_enabled=_typed_field(values, "jetstream_enabled", bool),
+        jetstream_url=_typed_field(values, "jetstream_url", str),
+        ical_feed_urls=_typed_field(values, "ical_feed_urls", list),
+        ical_interval_seconds=_typed_field(
+            values, "ical_interval_seconds", int
+        ),
+        expiry_interval_seconds=_typed_field(
+            values, "expiry_interval_seconds", int
+        ),
+        expiry_grace_seconds=_typed_field(values, "expiry_grace_seconds", int),
+        expiry_purge_days=_typed_field(values, "expiry_purge_days", int),
+    )
 
 
 def load_settings_from_environment(env_path: Path = ENV_PATH) -> Settings:

@@ -1,7 +1,7 @@
 """Subscribe/unsubscribe to events and read notifications (JSON and SSE)."""
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Annotated, Any
 
 from fastapi import (
@@ -103,7 +103,7 @@ async def sse_messages(
     subscriber_id: str,
     is_disconnected: Callable[[], Awaitable[bool]],
     ping_interval_seconds: float = PING_INTERVAL_SECONDS,
-) -> AsyncIterator[str]:
+) -> AsyncGenerator[str]:
     """
     Yield SSE frames for one client until it disconnects.
 

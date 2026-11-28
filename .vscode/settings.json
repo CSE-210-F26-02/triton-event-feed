@@ -10,6 +10,7 @@
         "itertools",
         "Jetstream",
         "NSID",
+        "rkey",
         "SOCKADDR",
         "uvicorn",
         "Vitest"

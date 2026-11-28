@@ -22,7 +22,7 @@ BUILT_PAGE_MARKER = "built-frontend-page"
 
 
 def commit(operation: str, record: dict | None = None) -> dict:
-    body = {
+    body: dict[str, object] = {
         "operation": operation,
         "collection": "app.communitymap.event",
         "rkey": "3kabc",
