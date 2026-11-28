@@ -24,11 +24,8 @@ def config(
     """
     Return the settings the frontend needs to pick its behaviour.
 
-    Args:
-        settings: the validated backend settings.
-
-    Returns:
-        Whether demo mode and Jetstream are on, and the record NSIDs.
+    :param settings: the validated backend settings.
+    :returns: Whether demo mode and Jetstream are on, and the record NSIDs.
     """
     return {
         "devMode": settings.dev_mode,

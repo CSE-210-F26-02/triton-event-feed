@@ -29,12 +29,9 @@ def event_status(event: IndexedEvent, now: datetime) -> Status:
     """
     Classify an event as upcoming, live, ending soon or ended.
 
-    Args:
-        event: the event to classify.
-        now: the current time.
-
-    Returns:
-        The event's status at `now`.
+    :param event: the event to classify.
+    :param now: the current time.
+    :returns: The event's status at `now`.
     """
     now = _as_utc(now)
     ends_at = _as_utc(event.record.ends_at)
@@ -51,12 +48,9 @@ def event_view(event: IndexedEvent, now: datetime) -> dict[str, Any]:
     """
     Flatten an event into the camelCase JSON the frontend reads.
 
-    Args:
-        event: the event to serialise.
-        now: the current time, used for the "status" field.
-
-    Returns:
-        The index metadata and record fields merged, plus "status".
+    :param event: the event to serialise.
+    :param now: the current time, used for the "status" field.
+    :returns: The index metadata and record fields merged, plus "status".
     """
     record = event.record.model_dump(mode="json", by_alias=True)
     metadata = event.model_dump(mode="json", by_alias=True, exclude={"record"})

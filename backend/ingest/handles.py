@@ -29,12 +29,9 @@ def did_document_url(did: str, plc_url: str = DEFAULT_PLC_URL) -> str | None:
     """
     Where to fetch a DID's document, or None for unsupported DIDs.
 
-    Args:
-        did: a did:plc or did:web identifier.
-        plc_url: the PLC directory to use for did:plc.
-
-    Returns:
-        The document URL, or None.
+    :param did: a did:plc or did:web identifier.
+    :param plc_url: the PLC directory to use for did:plc.
+    :returns: The document URL, or None.
     """
     if did.startswith(DID_PLC_PREFIX):
         return f"{plc_url}/{did}"
@@ -53,11 +50,8 @@ def handle_from_did_document(did_document: Any) -> str | None:
     """
     Return the first at:// alias in a DID document, without "at://".
 
-    Args:
-        doc: the decoded DID document (untrusted; may be malformed).
-
-    Returns:
-        The handle, or None if the document has none.
+    :param doc: the decoded DID document (untrusted; may be malformed).
+    :returns: The handle, or None if the document has none.
     """
     aliases = (
         did_document.get("alsoKnownAs")
@@ -92,12 +86,11 @@ class HandleResolver:
         """
         Create a resolver.
 
-        Args:
-            client: HTTP client to use; None creates one.
-            ttl_seconds: how long a lookup result is cached.
-            max_size: most DIDs kept in the cache.
-            plc_url: the PLC directory to use for did:plc.
-            clock: returns monotonic seconds (injected for tests).
+        :param client: HTTP client to use; None creates one.
+        :param ttl_seconds: how long a lookup result is cached.
+        :param max_size: most DIDs kept in the cache.
+        :param plc_url: the PLC directory to use for did:plc.
+        :param clock: returns monotonic seconds (injected for tests).
         """
         self.client = client or httpx.AsyncClient(
             timeout=REQUEST_TIMEOUT_SECONDS

@@ -24,8 +24,7 @@ class SubscriptionNotifier:
         """
         Create a notifier that persists into store.
 
-        Args:
-            store: where notifications and subscriptions live.
+        :param store: where notifications and subscriptions live.
         """
         self._store = store
         self._queues: dict[str, set[asyncio.Queue[Notification]]] = {}
@@ -36,8 +35,7 @@ class SubscriptionNotifier:
         """
         Persist and push one notification per subscriber of event_uri.
 
-        Returns:
-            How many subscribers were notified.
+        :returns: How many subscribers were notified.
         """
         now = datetime.now(UTC)
         subscribers = self._store.subscribers_of(event_uri)

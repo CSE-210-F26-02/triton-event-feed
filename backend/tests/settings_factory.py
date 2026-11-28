@@ -36,10 +36,7 @@ def make_test_settings(**overrides: object) -> Settings:
     """
     Return BASE_TEST_SETTINGS with some fields replaced.
 
-    Args:
-        **overrides: Settings field names and the values to use instead.
-
-    Returns:
-        A new, complete Settings.
+    :param overrides: Settings field names and the values to use instead.
+    :returns: A new, complete Settings.
     """
     return replace(BASE_TEST_SETTINGS, **overrides)

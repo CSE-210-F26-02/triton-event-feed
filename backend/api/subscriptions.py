@@ -62,8 +62,7 @@ def subscribe(body: SubscriptionBody, store: Store) -> Response:
     """
     Subscribe a client to an event.
 
-    Raises:
-        HTTPException: 404 when the event does not exist.
+    :raises HTTPException: 404 when the event does not exist.
     """
     if store.get_event(body.event_uri) is None:
         raise HTTPException(
@@ -110,14 +109,11 @@ async def sse_messages(
 
     The client's queue is always released, even if the stream errors.
 
-    Args:
-        notifier: the live notifier the client listens to.
-        subscriber_id: the client's opaque id.
-        is_disconnected: returns True once the client has gone away.
-        ping_interval_seconds: idle time before a keep-alive ping.
-
-    Yields:
-        SSE frames: a connected comment, pings and notification events.
+    :param notifier: the live notifier the client listens to.
+    :param subscriber_id: the client's opaque id.
+    :param is_disconnected: returns True once the client has gone away.
+    :param ping_interval_seconds: idle time before a keep-alive ping.
+    :yields: SSE frames: a connected comment, pings and notification events.
     """
     queue = notifier.connect(subscriber_id)
     try:
@@ -145,8 +141,7 @@ async def stream_notifications(
     """
     Stream the client's notifications live over Server-Sent Events.
 
-    Raises:
-        HTTPException: 503 when the notifier cannot push live updates.
+    :raises HTTPException: 503 when the notifier cannot push live updates.
     """
     if not isinstance(notifier, SubscriptionNotifier):
         raise HTTPException(

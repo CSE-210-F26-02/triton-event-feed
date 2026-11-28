@@ -78,11 +78,8 @@ def parse_commit(message: dict[str, Any]) -> Commit | None:
     """
     Extract the commit from a Jetstream message.
 
-    Args:
-        msg: a decoded Jetstream message.
-
-    Returns:
-        The commit, or None if msg is not a usable commit.
+    :param msg: a decoded Jetstream message.
+    :returns: The commit, or None if msg is not a usable commit.
     """
     body = message.get("commit")
     if message.get("kind") != "commit" or not isinstance(body, dict):
@@ -199,14 +196,11 @@ async def index_event(
     """
     Upsert event and notify subscribers of meaningful changes.
 
-    Args:
-        store: the event store.
-        notifier: tells subscribers what changed.
-        event: the new version of the event.
-        existing: the stored version, whose indexed_at is kept, or None.
-
-    Returns:
-        Whether the event was created, updated or unchanged.
+    :param store: the event store.
+    :param notifier: tells subscribers what changed.
+    :param event: the new version of the event.
+    :param existing: the stored version, whose indexed_at is kept, or None.
+    :returns: Whether the event was created, updated or unchanged.
     """
     if existing is not None:
         event = event.model_copy(update={"indexed_at": existing.indexed_at})
@@ -241,11 +235,8 @@ def _facet_tags(facets: Any) -> set[str]:
     """
     Lower-cased tags from a post's richtext tag facets.
 
-    Args:
-        facets: the post's "facets" value (untrusted; may be malformed).
-
-    Returns:
-        The tags found, without a leading "#".
+    :param facets: the post's "facets" value (untrusted; may be malformed).
+    :returns: The tags found, without a leading "#".
     """
     tags: set[str] = set()
     if not isinstance(facets, list):
@@ -277,12 +268,11 @@ class CommitProcessor:
         """
         Create a processor.
 
-        Args:
-            store: the event store.
-            notifier: tells subscribers about changes.
-            handle_resolver: looks up author handles, or None to skip.
-            on_listeners_changed: called with the new listener DIDs.
-            clock: returns the current time (injected for tests).
+        :param store: the event store.
+        :param notifier: tells subscribers about changes.
+        :param handle_resolver: looks up author handles, or None to skip.
+        :param on_listeners_changed: called with the new listener DIDs.
+        :param clock: returns the current time (injected for tests).
         """
         self.store = store
         self.notifier = notifier

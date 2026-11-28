@@ -1,4 +1,6 @@
-"""Import events from iCalendar (.ics) feeds into the index."""
+"""
+Import events from iCalendar (.ics) feeds into the index.
+"""
 
 from __future__ import annotations
 
@@ -130,8 +132,7 @@ def _event_record(vevent: Component, now: datetime) -> EventRecord:
     """
     Build the lexicon record for one VEVENT.
 
-    Raises:
-        ValidationError: when the VEVENT does not make a valid record.
+    :raises ValidationError: when the VEVENT does not make a valid record.
     """
     starts_at, ends_at = _start_and_end(vevent)
     created = vevent.get("CREATED")
@@ -155,8 +156,7 @@ def _indexed_event(
     """
     Build the indexed event for one VEVENT, or None if it has ended.
 
-    Raises:
-        ValueError: when the VEVENT has no UID.
+    :raises ValueError: when the VEVENT has no UID.
     """
     uid = _text_property(vevent, "UID", MAX_UID_LENGTH)
     if uid is None:
@@ -178,16 +178,11 @@ def parse_ics(text: str, feed_url: str, now: datetime) -> list[IndexedEvent]:
     """
     Parse a feed into IndexedEvents; malformed VEVENTs are skipped.
 
-    Args:
-        text: the feed body.
-        feed_url: where the feed came from (part of each event's URI).
-        now: the current time; events that have ended are dropped.
-
-    Returns:
-        The feed's current events.
-
-    Raises:
-        ValueError: if text is not a calendar at all.
+    :param text: the feed body.
+    :param feed_url: where the feed came from (part of each event's URI).
+    :param now: the current time; events that have ended are dropped.
+    :returns: The feed's current events.
+    :raises ValueError: if text is not a calendar at all.
     """
     calendar = Calendar.from_ical(text)
     host = urlsplit(feed_url).hostname or UNKNOWN_HOST
@@ -226,19 +221,14 @@ async def import_feed(
     """
     Fetch and index one feed.
 
-    Args:
-        url: the feed URL.
-        store: the event store.
-        notifier: tells subscribers about changed events.
-        client: the HTTP client used to fetch the feed.
-        clock: returns the current time (injected for tests).
-
-    Returns:
-        The number of current events imported.
-
-    Raises:
-        httpx.HTTPError: when the feed cannot be fetched.
-        ValueError: when the body is not iCalendar.
+    :param url: the feed URL.
+    :param store: the event store.
+    :param notifier: tells subscribers about changed events.
+    :param client: the HTTP client used to fetch the feed.
+    :param clock: returns the current time (injected for tests).
+    :returns: The number of current events imported.
+    :raises httpx.HTTPError: when the feed cannot be fetched.
+    :raises ValueError: when the body is not iCalendar.
     """
     response = await client.get(
         url, timeout=FETCH_TIMEOUT_SECONDS, follow_redirects=True
@@ -264,13 +254,12 @@ async def run_ical_loop(
     Poll every configured feed forever; a failing feed is logged and
     skipped.
 
-    Args:
-        store: the event store.
-        notifier: tells subscribers about changed events.
-        settings: supplies the feed URLs and polling interval.
-        client: HTTP client to use; None creates (and closes) one.
-        sleep: waits between rounds (injected for tests).
-        clock: returns the current time (injected for tests).
+    :param store: the event store.
+    :param notifier: tells subscribers about changed events.
+    :param settings: supplies the feed URLs and polling interval.
+    :param client: HTTP client to use; None creates (and closes) one.
+    :param sleep: waits between rounds (injected for tests).
+    :param clock: returns the current time (injected for tests).
     """
     if not settings.ical_feed_urls:
         return

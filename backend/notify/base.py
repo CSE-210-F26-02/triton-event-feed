@@ -19,12 +19,9 @@ class Notifier(Protocol):
         """
         Fan out to every subscriber of event_uri (persist + live push).
 
-        Args:
-            event_uri: the event the message is about.
-            kind: what happened (updated, deleted, announcement, expired).
-            message: human-readable text shown to subscribers.
-
-        Returns:
-            How many subscribers were notified.
+        :param event_uri: the event the message is about.
+        :param kind: what happened (updated, deleted, announcement, expired).
+        :param message: human-readable text shown to subscribers.
+        :returns: How many subscribers were notified.
         """
         ...

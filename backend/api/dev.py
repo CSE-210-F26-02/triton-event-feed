@@ -29,8 +29,7 @@ def require_dev_mode(
     """
     Hide the route (404) unless dev mode is on.
 
-    Raises:
-        HTTPException: 404 when settings.dev_mode is False.
+    :raises HTTPException: 404 when settings.dev_mode is False.
     """
     if not settings.dev_mode:
         raise HTTPException(HTTP_NOT_FOUND, "Not Found")
@@ -44,12 +43,9 @@ async def post_dev_record(
     """
     Process one Jetstream-shaped message as if it came from the network.
 
-    Args:
-        message: a Jetstream commit message.
-        processor: the commit processor.
-
-    Returns:
-        {"ok": True} once the message has been handled.
+    :param message: a Jetstream commit message.
+    :param processor: the commit processor.
+    :returns: {"ok": True} once the message has been handled.
     """
     await processor.handle(message)
     return {"ok": True}

@@ -82,14 +82,11 @@ def _start_background_tasks(
     """
     Start the expiry sweep, the iCal poller and (if enabled) Jetstream.
 
-    Args:
-        settings: the validated settings.
-        store: the event store the loops read and write.
-        notifier: tells subscribers about expired or changed events.
-        processor: turns Jetstream commits into index changes.
-
-    Returns:
-        The started tasks, so the caller can cancel them on shutdown.
+    :param settings: the validated settings.
+    :param store: the event store the loops read and write.
+    :param notifier: tells subscribers about expired or changed events.
+    :param processor: turns Jetstream commits into index changes.
+    :returns: The started tasks, so the caller can cancel them on shutdown.
     """
     tasks = [
         asyncio.create_task(run_expiry_loop(store, notifier, settings)),
@@ -107,8 +104,7 @@ async def _cancel_tasks(tasks: list[asyncio.Task]) -> None:
     """
     Cancel every task and wait until each one has stopped.
 
-    Args:
-        tasks: the background tasks to stop.
+    :param tasks: the background tasks to stop.
     """
     for task in tasks:
         task.cancel()
@@ -121,12 +117,9 @@ def _build_lifespan(settings: Settings, background: bool) -> Lifespan:
     """
     Build the startup/shutdown handler that owns every service.
 
-    Args:
-        settings: the validated settings.
-        background: False skips the background loops (used by tests).
-
-    Returns:
-        A FastAPI lifespan function.
+    :param settings: the validated settings.
+    :param background: False skips the background loops (used by tests).
+    :returns: A FastAPI lifespan function.
     """
 
     @asynccontextmanager
@@ -157,9 +150,8 @@ def _add_middleware(app: FastAPI, settings: Settings) -> None:
     """
     Add response compression and CORS.
 
-    Args:
-        app: the application to configure.
-        settings: the validated settings; cors_allowed_origins is used.
+    :param app: the application to configure.
+    :param settings: the validated settings; cors_allowed_origins is used.
     """
     app.add_middleware(GZipMiddleware, minimum_size=GZIP_MINIMUM_SIZE_BYTES)
     app.add_middleware(
@@ -179,11 +171,8 @@ def is_frontend_source(folder: Path) -> bool:
     imports and VITE_* settings), and serving it would also publish files
     such as frontend/.env and package.json.
 
-    Args:
-        folder: the folder FRONTEND_DIR points at.
-
-    Returns:
-        Whether a source-only marker file (package.json) is present.
+    :param folder: the folder FRONTEND_DIR points at.
+    :returns: Whether a source-only marker file (package.json) is present.
     """
     return any(
         (folder / marker).is_file() for marker in FRONTEND_SOURCE_MARKERS
@@ -197,9 +186,8 @@ def _mount_frontend(app: FastAPI, frontend_dir: str) -> None:
     A missing folder, or the unbuilt source folder, is logged and skipped:
     the API keeps working either way.
 
-    Args:
-        app: the application to configure.
-        frontend_dir: folder holding the built frontend (frontend/dist).
+    :param app: the application to configure.
+    :param frontend_dir: folder holding the built frontend (frontend/dist).
     """
     frontend = Path(frontend_dir)
     if not frontend.is_dir():
@@ -230,16 +218,11 @@ def create_app(
     """
     Build the FastAPI application.
 
-    Args:
-        settings: the validated settings; None reads them from backend/.env
-            and the environment (and sets up logging).
-        background: False skips the expiry, iCal and Jetstream loops.
-
-    Returns:
-        The configured application.
-
-    Raises:
-        ConfigError: when settings is None and the environment is invalid.
+    :param settings: the validated settings; None reads them from backend/.env
+        and the environment (and sets up logging).
+    :param background: False skips the expiry, iCal and Jetstream loops.
+    :returns: The configured application.
+    :raises ConfigError: when settings is None and the environment is invalid.
     """
     if settings is None:
         settings = load_settings_from_environment()

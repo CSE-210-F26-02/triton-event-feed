@@ -5,6 +5,7 @@
         "communitymap",
         "dotenv",
         "fastapi",
+        "ical",
         "IPPROTO",
         "itertools",
         "Jetstream",

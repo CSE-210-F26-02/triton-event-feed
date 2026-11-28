@@ -101,8 +101,7 @@ def _parse_bbox(bbox: str | None) -> BoundingBox | None:
     """
     Parse the ?bbox= parameter.
 
-    Raises:
-        HTTPException: 422 when bbox is malformed.
+    :raises HTTPException: 422 when bbox is malformed.
     """
     if bbox is None:
         return None
@@ -139,8 +138,7 @@ def list_events(
     """
     List current events matching the filters, one page at a time.
 
-    Raises:
-        HTTPException: 422 for a bad bbox, 400 for a bad cursor.
+    :raises HTTPException: 422 for a bad bbox, 400 for a bad cursor.
     """
     now = datetime.now(UTC)
     query = EventQuery(
@@ -172,8 +170,7 @@ def get_event(uri: str, request: Request, store: Store) -> Response:
     """
     Return one event with its announcements.
 
-    Raises:
-        HTTPException: 404 when no event has this URI.
+    :raises HTTPException: 404 when no event has this URI.
     """
     event = store.get_event(uri)
     if event is None:

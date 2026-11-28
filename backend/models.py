@@ -215,9 +215,8 @@ class BoundingBox(_Camel):
         """
         Parse a "west,south,east,north" query-string value.
 
-        Raises:
-            ValueError: when there are not four numbers, or they are out
-                of range.
+        :raises ValueError: when there are not four numbers, or they are out of
+            range.
         """
         parts = [part.strip() for part in bbox_param.split(",")]
         if len(parts) != BBOX_PARTS:

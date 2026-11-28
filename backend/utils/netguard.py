@@ -21,12 +21,9 @@ def is_public_url(url: str, resolve=socket.getaddrinfo) -> bool:
     """
     True when url is http(s) and every address of its host is public.
 
-    Args:
-        url: the URL about to be fetched.
-        resolve: DNS lookup function (injected so tests need no network).
-
-    Returns:
-        False for other schemes, unresolvable hosts, or any private,
+    :param url: the URL about to be fetched.
+    :param resolve: DNS lookup function (injected so tests need no network).
+    :returns: False for other schemes, unresolvable hosts, or any private,
         loopback or link-local address.
     """
     parts = urlsplit(url)

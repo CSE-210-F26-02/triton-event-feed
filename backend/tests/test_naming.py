@@ -89,11 +89,8 @@ def naming_problem(name):
     """
     Explain why a name is unclear, or return None when it is fine.
 
-    Args:
-        name: a declared identifier.
-
-    Returns:
-        A short reason, or None.
+    :param name: a declared identifier.
+    :returns: A short reason, or None.
     """
     if is_dunder(name) or name in LIBRARY_DEFINED_NAMES:
         return None

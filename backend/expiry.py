@@ -27,12 +27,9 @@ def _expired_events(store: EventStore, cutoff: datetime) -> list[IndexedEvent]:
     """
     Return every event with endsAt < cutoff, page by page.
 
-    Args:
-        store: the event store to search.
-        cutoff: events that ended before this moment are expired.
-
-    Returns:
-        The expired events.
+    :param store: the event store to search.
+    :param cutoff: events that ended before this moment are expired.
+    :returns: The expired events.
     """
     expired: list[IndexedEvent] = []
     query = EventQuery(
@@ -74,15 +71,12 @@ async def sweep_once(
     """
     Notify subscribers of newly ended events and purge old ones.
 
-    Args:
-        store: the event store.
-        notifier: tells subscribers their event has ended.
-        now: the current time.
-        grace_seconds: how long after endsAt an event counts as ended.
-        purge_days: how long after that an event is deleted.
-
-    Returns:
-        The URIs of the deleted events.
+    :param store: the event store.
+    :param notifier: tells subscribers their event has ended.
+    :param now: the current time.
+    :param grace_seconds: how long after endsAt an event counts as ended.
+    :param purge_days: how long after that an event is deleted.
+    :returns: The URIs of the deleted events.
     """
     expiry_cutoff = _as_utc(now) - timedelta(seconds=grace_seconds)
     for event in _expired_events(store, expiry_cutoff):
@@ -101,10 +95,9 @@ async def run_expiry_loop(
     """
     Run sweep_once forever; a failed sweep is logged, not fatal.
 
-    Args:
-        store: the event store.
-        notifier: tells subscribers their event has ended.
-        settings: supplies the grace period, purge age and interval.
+    :param store: the event store.
+    :param notifier: tells subscribers their event has ended.
+    :param settings: supplies the grace period, purge age and interval.
     """
     while True:
         try:

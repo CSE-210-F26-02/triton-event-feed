@@ -168,8 +168,7 @@ def decode_cursor(
     """
     Return (timestamp, uri) from a cursor made by encode_cursor.
 
-    Raises:
-        ValueError: on a malformed cursor or a sort-mode mismatch.
+    :raises ValueError: on a malformed cursor or a sort-mode mismatch.
     """
     try:
         decoded_cursor = base64.urlsafe_b64decode(cursor.encode()).decode()
@@ -345,8 +344,7 @@ class SqliteStore:
         """
         Open (creating if needed) the database and its tables.
 
-        Args:
-            path: the SQLite file, or ":memory:" for a throwaway database.
+        :param path: the SQLite file, or ":memory:" for a throwaway database.
         """
         if path != IN_MEMORY_PATH:
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
@@ -387,8 +385,7 @@ class SqliteStore:
         """
         Insert or replace an event, keeping its first indexed_at.
 
-        Returns:
-            "unchanged" when cid and record match the stored copy,
+        :returns: "unchanged" when cid and record match the stored copy,
             otherwise "created" or "updated".
         """
         record_json = _record_json(event.record)
@@ -441,8 +438,7 @@ class SqliteStore:
         """
         Return one page of events matching query (keyset paginated).
 
-        Raises:
-            ValueError: when query.cursor is malformed.
+        :raises ValueError: when query.cursor is malformed.
         """
         filter_where, filter_params = _filter_clauses(query, now)
         cursor_where, cursor_params = _cursor_clauses(query)

@@ -152,13 +152,12 @@ class JetstreamClient:
         """
         Create a client (it connects only when run_forever is awaited).
 
-        Args:
-            url: the Jetstream subscribe endpoint.
-            processor: handles every received message.
-            store: holds the saved cursors and listener DIDs.
-            cursor_name: name of the saved cursor for the events stream.
-            connect: opens a WebSocket (injected for tests).
-            sleep: waits between reconnects (injected for tests).
+        :param url: the Jetstream subscribe endpoint.
+        :param processor: handles every received message.
+        :param store: holds the saved cursors and listener DIDs.
+        :param cursor_name: name of the saved cursor for the events stream.
+        :param connect: opens a WebSocket (injected for tests).
+        :param sleep: waits between reconnects (injected for tests).
         """
         self.url = url
         self.processor = processor

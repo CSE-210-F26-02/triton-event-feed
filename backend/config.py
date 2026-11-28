@@ -98,16 +98,14 @@ class ConfigError(ValueError):
     """
     Raised when one or more environment variables are missing or invalid.
 
-    Attributes:
-        problems: one human-readable message per bad variable.
+    :ivar problems: one human-readable message per bad variable.
     """
 
     def __init__(self, problems: list[str]):
         """
         Build the error message from every recorded problem.
 
-        Args:
-            problems: one human-readable message per bad variable.
+        :param problems: one human-readable message per bad variable.
         """
         self.problems = problems
         details = "\n  - ".join(problems)
@@ -122,25 +120,24 @@ class Settings:
     """
     Validated backend settings.
 
-    Attributes:
-        is_prod: True when running in production.
-        cors_allowed_origins: origins allowed to call the API; empty means
-            same-origin only (no cross-origin callers).
-        api_host: interface uvicorn binds to, e.g. "127.0.0.1".
-        api_port: TCP port uvicorn listens on.
-        log_level: logging level name, e.g. "INFO".
-        database_path: SQLite file path, or ":memory:" for tests.
-        frontend_dir: folder of static frontend files served at "/".
-        dev_mode: True exposes POST /api/dev/records, which simulates
-            firehose commits locally (demo mode).
-        jetstream_enabled: True indexes live records from Jetstream;
-            False indexes only via dev mode and iCal imports.
-        jetstream_url: Jetstream WebSocket endpoint (ws:// or wss://).
-        ical_feed_urls: iCal feed URLs polled in the background.
-        ical_interval_seconds: seconds between iCal polling rounds.
-        expiry_interval_seconds: seconds between expiry sweeps.
-        expiry_grace_seconds: seconds an event stays visible after it ends.
-        expiry_purge_days: days an expired event is kept before deletion.
+    :ivar is_prod: True when running in production.
+    :ivar cors_allowed_origins: origins allowed to call the API; empty means
+        same-origin only (no cross-origin callers).
+    :ivar api_host: interface uvicorn binds to, e.g. "127.0.0.1".
+    :ivar api_port: TCP port uvicorn listens on.
+    :ivar log_level: logging level name, e.g. "INFO".
+    :ivar database_path: SQLite file path, or ":memory:" for tests.
+    :ivar frontend_dir: folder of static frontend files served at "/".
+    :ivar dev_mode: True exposes POST /api/dev/records, which simulates
+        firehose commits locally (demo mode).
+    :ivar jetstream_enabled: True indexes live records from Jetstream; False
+        indexes only via dev mode and iCal imports.
+    :ivar jetstream_url: Jetstream WebSocket endpoint (ws:// or wss://).
+    :ivar ical_feed_urls: iCal feed URLs polled in the background.
+    :ivar ical_interval_seconds: seconds between iCal polling rounds.
+    :ivar expiry_interval_seconds: seconds between expiry sweeps.
+    :ivar expiry_grace_seconds: seconds an event stays visible after it ends.
+    :ivar expiry_purge_days: days an expired event is kept before deletion.
     """
 
     is_prod: bool
@@ -167,11 +164,8 @@ def load_env_file(path: Path = ENV_PATH) -> bool:
     Variables that are already set are left alone (override=False), so the
     real environment always wins over the file.
 
-    Args:
-        path: the .env file to read; a missing file is not an error.
-
-    Returns:
-        True if the file existed and was read.
+    :param path: the .env file to read; a missing file is not an error.
+    :returns: True if the file existed and was read.
     """
     return load_dotenv(path, override=False)
 
@@ -180,12 +174,9 @@ def _optional(environ: Mapping[str, str], name: str) -> str | None:
     """
     Return a variable's trimmed value, or None when unset or blank.
 
-    Args:
-        environ: where to read variables from.
-        name: the variable to read.
-
-    Returns:
-        The trimmed value, or None if the variable is missing or blank.
+    :param environ: where to read variables from.
+    :param name: the variable to read.
+    :returns: The trimmed value, or None if the variable is missing or blank.
     """
     value = environ.get(name)
     if value is None or value.strip() == "":
@@ -218,12 +209,9 @@ def _has_scheme_and_host(value: str, allowed_schemes: set[str]) -> bool:
     """
     True when value is a URL with one of allowed_schemes and a host.
 
-    Args:
-        value: the candidate URL, e.g. "https://events.example.edu".
-        allowed_schemes: accepted schemes, e.g. {"http", "https"}.
-
-    Returns:
-        Whether the scheme is allowed and a host is present.
+    :param value: the candidate URL, e.g. "https://events.example.edu".
+    :param allowed_schemes: accepted schemes, e.g. {"http", "https"}.
+    :returns: Whether the scheme is allowed and a host is present.
     """
     parsed = urlparse(value)
     return parsed.scheme in allowed_schemes and bool(parsed.netloc)
@@ -293,15 +281,13 @@ def _parse_optional_integer(
     """
     Parse an optional whole number that must be at least minimum.
 
-    Args:
-        environ: where to read variables from.
-        name: the variable to read.
-        problems: list that collects one message per bad variable.
-        default: value used when the variable is unset or blank.
-        minimum: smallest accepted value.
-
-    Returns:
-        The parsed number, the default, or None after recording a problem.
+    :param environ: where to read variables from.
+    :param name: the variable to read.
+    :param problems: list that collects one message per bad variable.
+    :param default: value used when the variable is unset or blank.
+    :param minimum: smallest accepted value.
+    :returns: The parsed number, the default, or None after recording a
+        problem.
     """
     value = _optional(environ, name)
     if value is None:
@@ -433,15 +419,10 @@ def load_settings(environ: Mapping[str, str]) -> Settings:
     """
     Read and validate every backend setting.
 
-    Args:
-        environ: where to read variables from, usually os.environ (after
-            load_env_file()). Tests pass a plain dict.
-
-    Returns:
-        The validated Settings.
-
-    Raises:
-        ConfigError: listing every missing or invalid variable.
+    :param environ: where to read variables from, usually os.environ (after
+        load_env_file()). Tests pass a plain dict.
+    :returns: The validated Settings.
+    :raises ConfigError: listing every missing or invalid variable.
     """
     problems: list[str] = []
     settings = {
@@ -458,14 +439,9 @@ def load_settings_from_environment(env_path: Path = ENV_PATH) -> Settings:
     """
     Load backend/.env into os.environ, then read and validate settings.
 
-    Args:
-        env_path: the .env file to read; a missing file is not an error.
-
-    Returns:
-        The validated Settings.
-
-    Raises:
-        ConfigError: listing every missing or invalid variable.
+    :param env_path: the .env file to read; a missing file is not an error.
+    :returns: The validated Settings.
+    :raises ConfigError: listing every missing or invalid variable.
     """
     load_env_file(env_path)
     return load_settings(os.environ)
@@ -475,8 +451,7 @@ def configure_logging(settings: Settings) -> None:
     """
     Set up the root logger at the configured level.
 
-    Args:
-        settings: the validated settings; only log_level is used.
+    :param settings: the validated settings; only log_level is used.
     """
     logging.basicConfig(
         level=settings.log_level,

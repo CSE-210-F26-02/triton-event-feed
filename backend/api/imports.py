@@ -66,9 +66,8 @@ async def import_ical(
     """
     Fetch an iCal feed and index its current events.
 
-    Raises:
-        HTTPException: 422 for a private host, 502 when the feed cannot be
-            fetched or is not an iCalendar file.
+    :raises HTTPException: 422 for a private host, 502 when the feed cannot be
+        fetched or is not an iCalendar file.
     """
     if not url_guard(body.url):
         raise HTTPException(

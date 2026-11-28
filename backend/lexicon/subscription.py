@@ -82,12 +82,9 @@ def validate_subscription(record: Any) -> list[str]:
     """
     Check an app.communitymap.subscription record.
 
-    Args:
-        record: the subscription as a dict (e.g. parsed JSON from a PDS).
-
-    Returns:
-        A list of error messages. An empty list means the record is valid.
-        Each message starts with the field it is about, for example
+    :param record: the subscription as a dict (e.g. parsed JSON from a PDS).
+    :returns: A list of error messages. An empty list means the record is
+        valid. Each message starts with the field it is about, for example
         "subject.cid is required".
 
     Fields that aren't in the lexicon are ignored, because the lexicon

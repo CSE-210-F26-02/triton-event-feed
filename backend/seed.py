@@ -186,12 +186,9 @@ def _seed_event(row: SeedRow, now: datetime) -> IndexedEvent:
     """
     Build one sample event from a SEED row, timed relative to now.
 
-    Args:
-        row: one entry of SEED.
-        now: the moment the start offsets are measured from.
-
-    Returns:
-        The sample event, ready to upsert.
+    :param row: one entry of SEED.
+    :param now: the moment the start offsets are measured from.
+    :returns: The sample event, ready to upsert.
     """
     rkey, did, handle, name, description, place = row[:6]
     start_hours, duration_hours, tags, group = row[6:]
