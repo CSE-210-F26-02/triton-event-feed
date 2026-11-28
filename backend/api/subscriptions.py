@@ -1,4 +1,6 @@
-"""Subscribe/unsubscribe to events and read notifications (JSON and SSE)."""
+"""
+Subscribe/unsubscribe to events and read notifications (JSON and SSE).
+"""
 
 import asyncio
 from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -44,7 +46,9 @@ SubscriberIdQuery = Annotated[
 
 
 class SubscriptionBody(BaseModel):
-    """Body of POST and DELETE /api/subscriptions."""
+    """
+    Body of POST and DELETE /api/subscriptions.
+    """
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
@@ -53,7 +57,12 @@ class SubscriptionBody(BaseModel):
 
 
 def _notification_json(notification: Notification) -> dict[str, Any]:
-    """Serialise a notification with camelCase keys."""
+    """
+    Serialise a notification with camelCase keys.
+
+    :param notification: the notification to send.
+    :returns: its JSON-ready dictionary.
+    """
     return notification.model_dump(mode="json", by_alias=True)
 
 
@@ -62,6 +71,9 @@ def subscribe(body: SubscriptionBody, store: Store) -> Response:
     """
     Subscribe a client to an event.
 
+    :param body: the JSON body: the client's subscriberId and the eventUri.
+    :param store: the event index.
+    :returns: an empty 204 response.
     :raises HTTPException: 404 when the event does not exist.
     """
     if store.get_event(body.event_uri) is None:
@@ -74,7 +86,13 @@ def subscribe(body: SubscriptionBody, store: Store) -> Response:
 
 @router.delete("/subscriptions", status_code=HTTP_NO_CONTENT)
 def unsubscribe(body: SubscriptionBody, store: Store) -> Response:
-    """Unsubscribe a client from an event (no error if not subscribed)."""
+    """
+    Unsubscribe a client from an event (no error if not subscribed).
+
+    :param body: the JSON body: the client's subscriberId and the eventUri.
+    :param store: the event index.
+    :returns: an empty 204 response.
+    """
     store.unsubscribe(body.subscriber_id, body.event_uri)
     return Response(status_code=HTTP_NO_CONTENT)
 
@@ -83,7 +101,13 @@ def unsubscribe(body: SubscriptionBody, store: Store) -> Response:
 def list_subscriptions(
     subscriber_id: SubscriberIdQuery, store: Store
 ) -> list[str]:
-    """Return the URIs of every event the client is subscribed to."""
+    """
+    Return the ids of every event the client is subscribed to.
+
+    :param subscriber_id: ?subscriberId=, the client's opaque id.
+    :param store: the event index.
+    :returns: the events' ids (AT URIs).
+    """
     return store.subscriptions_of(subscriber_id)
 
 
@@ -93,7 +117,14 @@ def list_notifications(
     store: Store,
     since: Annotated[int, Query(ge=0)] = 0,
 ) -> list[dict[str, Any]]:
-    """Return the client's notifications newer than the id `since`."""
+    """
+    Return the client's notifications newer than the id `since`.
+
+    :param subscriber_id: ?subscriberId=, the client's opaque id.
+    :param store: the event index.
+    :param since: ?since=, the id of the last notification the client saw.
+    :returns: the notifications as camelCase JSON, oldest first.
+    """
     notifications = store.list_notifications(subscriber_id, since)
     return [_notification_json(notification) for notification in notifications]
 
@@ -141,6 +172,10 @@ async def stream_notifications(
     """
     Stream the client's notifications live over Server-Sent Events.
 
+    :param request: the HTTP request, checked to stop when the client leaves.
+    :param subscriber_id: ?subscriberId=, the client's opaque id.
+    :param notifier: the notifier; it must support live streams.
+    :returns: a text/event-stream response that stays open.
     :raises HTTPException: 503 when the notifier cannot push live updates.
     """
     if not isinstance(notifier, SubscriptionNotifier):

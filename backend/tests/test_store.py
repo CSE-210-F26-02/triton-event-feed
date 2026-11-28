@@ -1,3 +1,7 @@
+"""
+Tests for the SQLite event index (store/sqlite.py).
+"""
+
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -17,6 +21,12 @@ from store.sqlite import SqliteStore, to_iso
 
 
 def uris(page):
+    """
+    The record keys (last URI segment) of a page of events.
+
+    :param page: a page from query_events.
+    :returns: the record keys, in order.
+    """
     return [event.uri.rsplit("/", 1)[1] for event in page.events]
 
 
@@ -222,6 +232,12 @@ def test_subscriptions(store):
 
 def test_notifications(store, now):
     def make_notification(subscriber_id: str) -> Notification:
+        """
+        Build an unsaved notification for one subscriber.
+
+        :param subscriber_id: who it is for.
+        :returns: the notification.
+        """
         return Notification(
             subscriber_id=subscriber_id,
             event_uri="at://e",
@@ -312,6 +328,13 @@ def test_query_sort_newest_and_pagination(store, make_event, now):
 
 def test_query_bbox_and_antimeridian(store, make_event, now):
     def store_event_at(rkey: str, lat: str | None, lng: str | None):
+        """
+        Store an event at a position.
+
+        :param rkey: the record key, also used as the place name.
+        :param lat: the latitude, or None.
+        :param lng: the longitude, or None.
+        """
         event = make_event(rkey)
         record = event.record.model_copy(
             update={"location": Location(name=rkey, lat=lat, lng=lng)}

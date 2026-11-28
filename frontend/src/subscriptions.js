@@ -1,12 +1,19 @@
 /**
- * Event subscriptions (#19), stored as app.communitymap.subscription records on the
- * subscriber's own PDS: subscribing is createRecord, unsubscribing is deleteRecord, and
- * the list comes from com.atproto.repo.listRecords. Because the records live on the PDS,
- * subscriptions survive reloads and follow the user to other devices and apps.
+ * Event subscriptions (#19): "notify me when this event changes".
  *
- * Reading the PDS directly means this works before the indexer (#5) exists. Once #5
- * ingests the same records, the backend will know who to notify; nothing here changes.
- * Records that break the lexicon (e.g. written by another app) are ignored.
+ * On the AT Protocol network each user's data lives in their own account, stored on a
+ * server they choose (their "PDS"). So a subscription is not a row in our database: it
+ * is an app.communitymap.subscription record (a small JSON document) saved in the
+ * subscriber's own account. Subscribing saves one (createRecord), unsubscribing deletes
+ * it (deleteRecord), and the list is read back with com.atproto.repo.listRecords.
+ * Because the records live in the user's account, subscriptions survive reloads and
+ * follow the user to other devices and apps. Like every AT Protocol record, they are
+ * public. Terms: docs/projects/triton-event-feed/AT_PROTOCOL_GLOSSARY.md
+ *
+ * Reading the user's account directly means this works before the indexer (#5) exists.
+ * Once #5 ingests the same records, the backend will know who to notify; nothing here
+ * changes. Records that break the schema (lexicon), e.g. written by another app, are
+ * ignored.
  * @module subscriptions
  */
 import { isEnded } from "./filters.js";
@@ -17,7 +24,7 @@ import {
 } from "./lexicon/validateSubscription.js";
 import { parseAtUri } from "./records.js";
 
-/** Why a subscribe / unsubscribe request was refused before reaching the PDS. */
+/** Why a subscribe / unsubscribe request was refused before reaching the user's PDS. */
 export const SUBSCRIPTION_ERROR = Object.freeze({
   loginRequired: "login-required",
   eventEnded: "event-ended",
@@ -40,9 +47,10 @@ export class SubscriptionError extends Error {
 }
 
 /**
- * The part of a PDS writer this module needs (createAtprotoWriter implements it).
+ * The part of the account writer (it saves records in the user's account, on their PDS)
+ * this module needs. createAtprotoWriter implements it.
  * @typedef {object} SubscriptionRepo
- * @property {string} did the logged-in user's DID
+ * @property {string} did the logged-in user's permanent account id (DID)
  * @property {() => Promise<import('./atproto.js').ListedRecord[]>} listSubscriptions
  * @property {(record: object) => Promise<{uri: string, cid: string}>} createSubscription
  * @property {(recordKey: string) => Promise<unknown>} deleteSubscription
@@ -52,7 +60,8 @@ export class SubscriptionError extends Error {
  * Pure: turn listed subscription records into eventUri → [subscription record keys].
  * An event can have several records (e.g. subscribed from two tabs at once); all are
  * kept so unsubscribing removes every one. Invalid records are counted, not kept.
- * @param {unknown} listed com.atproto.repo.listRecords entries
+ * @param {unknown} listed the subscription records read back from the user's account
+ *   (com.atproto.repo.listRecords entries)
  * @returns {{recordKeysByEvent: Map<string, string[]>, skippedCount: number}}
  */
 export function indexSubscriptionRecords(listed) {
@@ -105,8 +114,8 @@ function subscriptionRecordFor(event, now) {
 /**
  * Create the subscription store.
  * @param {{getRepo: () => SubscriptionRepo|null, onChange?: (subscribed: Set<string>) => void,
- *   now?: () => Date}} deps `getRepo` returns the logged-in PDS writer, or null when
- *   logged out
+ *   now?: () => Date}} deps `getRepo` returns the logged-in account writer, or null
+ *   when logged out
  * @returns {{load(): Promise<void>, subscribe(event: object): Promise<boolean>,
  *   unsubscribe(uri: string): Promise<boolean>, toggle(event: object): Promise<boolean>,
  *   clear(): void, has(uri: string): boolean, readonly subscribed: Set<string>,

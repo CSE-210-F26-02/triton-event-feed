@@ -1,3 +1,7 @@
+"""
+Tests for importing external calendar (.ics) feeds (ingest/ical.py).
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -15,15 +19,31 @@ FIXED_NOW = utc_datetime(2026, 11, 11, 12)
 
 
 def fixed_clock():
-    """The clock import_feed sees, so results do not depend on today."""
+    """
+    The clock import_feed sees, so results do not depend on today.
+
+    :returns: FIXED_NOW.
+    """
     return FIXED_NOW
 
 
 def vevent(*lines: str) -> str:
+    """
+    Wrap iCal property lines in one VEVENT block.
+
+    :param lines: e.g. "UID:1", "SUMMARY:Taco Night".
+    :returns: the block's text.
+    """
     return "BEGIN:VEVENT\n" + "\n".join(lines) + "\nEND:VEVENT\n"
 
 
 def calendar(*events: str) -> str:
+    """
+    Wrap VEVENT blocks in a VCALENDAR.
+
+    :param events: blocks made by vevent.
+    :returns: the calendar's text.
+    """
     return (
         "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//test//EN\n"
         + "".join(events)
@@ -111,7 +131,22 @@ def test_not_a_calendar_raises() -> None:
 
 
 def mock_client(bodies: list[str], status: int = 200) -> httpx.AsyncClient:
+    """
+    Build an HTTP client that serves scripted feed bodies.
+
+    :param bodies: the bodies to serve, one per request; the last one
+        repeats.
+    :param status: the HTTP status of every response.
+    :returns: the client.
+    """
+
     def handle(request: httpx.Request) -> httpx.Response:
+        """
+        Serve the next scripted body.
+
+        :param request: the request the client under test sent.
+        :returns: the response.
+        """
         body = bodies.pop(0) if len(bodies) > 1 else bodies[0]
         return httpx.Response(status, text=body)
 
@@ -165,6 +200,13 @@ async def test_run_ical_loop_survives_errors() -> None:
     calls: list[str] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
+        """
+        Record the request; fail for feeds named "bad".
+
+        :param request: the request the client under test sent.
+        :returns: a one-event feed.
+        :raises httpx.ConnectError: for URLs containing "bad".
+        """
         calls.append(str(request.url))
         if "bad" in str(request.url):
             raise httpx.ConnectError("down")
@@ -173,6 +215,12 @@ async def test_run_ical_loop_survives_errors() -> None:
     sleeps: list[float] = []
 
     async def sleep(seconds: float) -> None:
+        """
+        Record the wait instead of waiting; stop the loop on the second one.
+
+        :param seconds: the requested wait.
+        :raises asyncio.CancelledError: on the second call.
+        """
         sleeps.append(seconds)
         if len(sleeps) == 2:
             raise asyncio.CancelledError
@@ -214,7 +262,9 @@ def test_event_uri_is_stable_across_releases():
 
 
 def test_event_uri_differs_per_feed_and_uid():
-    """The same UID in two feeds, or two UIDs in one feed, differ."""
+    """
+    The same UID in two feeds, or two UIDs in one feed, differ.
+    """
     uris = {
         event_uri("https://a.example/x.ics", "1@a"),
         event_uri("https://b.example/x.ics", "1@a"),

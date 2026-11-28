@@ -52,6 +52,7 @@ cd e2e && npm ci && npx playwright install chromium && npx playwright test
 
 ## Docs
 
+- [AT Protocol glossary](docs/projects/triton-event-feed/AT_PROTOCOL_GLOSSARY.md): start here if DID, PDS or "record" are new to you
 - [Architecture + infrastructure diagram](docs/projects/triton-event-feed/ARCHITECTURE.md)
 - [How the work was split](docs/projects/triton-event-feed/TEAM.md)
 - [Design decisions to debate](docs/projects/triton-event-feed/DECISIONS.md)

@@ -4,7 +4,7 @@
  *
  * Rules: an ended event shows no button (you can't subscribe to it), unless the user is
  * already subscribed, in which case "Subscribed ✓" stays so they can still unsubscribe.
- * The privacy note (subscriptions are public PDS records) is the button's tooltip and,
+ * The privacy note (subscriptions are public records in the user's account) is the button's tooltip and,
  * on the detail page, visible help text linked with aria-describedby.
  * @module views/subscribeButton
  */

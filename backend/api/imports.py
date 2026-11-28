@@ -1,4 +1,6 @@
-"""POST /api/import/ical: import events from an iCalendar feed on demand."""
+"""
+POST /api/import/ical: import events from an iCalendar feed on demand.
+"""
 
 from __future__ import annotations
 
@@ -24,14 +26,22 @@ HTTP_BAD_GATEWAY = 502
 
 
 class IcalImportRequest(BaseModel):
-    """Body of POST /api/import/ical."""
+    """
+    Body of POST /api/import/ical.
+    """
 
     url: str
 
     @field_validator("url")
     @classmethod
     def _http_only(cls, url: str) -> str:
-        """Accept only http(s) URLs that name a host."""
+        """
+        Accept only http(s) URLs that name a host.
+
+        :param url: the requested feed URL (untrusted).
+        :returns: the URL without surrounding whitespace.
+        :raises ValueError: when it is not an http(s) URL with a host.
+        """
         parts = urlsplit(url.strip())
         if parts.scheme not in ALLOWED_URL_SCHEMES or not parts.hostname:
             raise ValueError("url must be an http(s) URL")
@@ -39,19 +49,31 @@ class IcalImportRequest(BaseModel):
 
 
 class IcalImportResponse(BaseModel):
-    """Response of POST /api/import/ical."""
+    """
+    Response of POST /api/import/ical.
+    """
 
     imported: int
 
 
 async def get_http_client() -> AsyncIterator[httpx.AsyncClient]:
-    """Yield an HTTP client for one request, closing it afterwards."""
+    """
+    Open an HTTP client for one request, closing it afterwards.
+
+    :yields: the client.
+    """
     async with httpx.AsyncClient() as client:
         yield client
 
 
 def get_url_guard() -> Callable[[str], bool]:
-    """Return the check that refuses URLs pointing at private hosts."""
+    """
+    Return the check that refuses URLs pointing at private hosts.
+
+    Tests override this dependency so they can import from a local server.
+
+    :returns: a function that is True for URLs on public hosts.
+    """
     return is_public_url
 
 
@@ -66,8 +88,14 @@ async def import_ical(
     """
     Fetch an iCal feed and index its current events.
 
-    :raises HTTPException: 422 for a private host, 502 when the feed cannot be
-        fetched or is not an iCalendar file.
+    :param body: the JSON body, holding the feed's url.
+    :param url_guard: refuses URLs that point at private hosts (SSRF guard).
+    :param store: the event index.
+    :param notifier: tells subscribers about changed events.
+    :param client: the HTTP client that downloads the feed.
+    :returns: how many events were imported.
+    :raises HTTPException: 422 for a private host, 502 when the feed cannot
+        be fetched or is not an iCalendar file.
     """
     if not url_guard(body.url):
         raise HTTPException(

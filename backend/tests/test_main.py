@@ -22,6 +22,13 @@ BUILT_PAGE_MARKER = "built-frontend-page"
 
 
 def commit(operation: str, record: dict | None = None) -> dict:
+    """
+    Build a Jetstream commit for the event 3kabc of did:plc:host.
+
+    :param operation: "create", "update" or "delete".
+    :param record: the record's content (omitted for deletes).
+    :returns: the decoded message.
+    """
     body: dict[str, object] = {
         "operation": operation,
         "collection": "app.communitymap.event",
@@ -49,7 +56,12 @@ RECORD = {
 
 
 def make_built_frontend(parent):
-    """Create a minimal built frontend (what `npm run build` emits)."""
+    """
+    Create a minimal built frontend (what `npm run build` emits).
+
+    :param parent: the folder to create dist/ in.
+    :returns: the dist/ folder.
+    """
     built = parent / "dist"
     (built / "assets").mkdir(parents=True)
     (built / "index.html").write_text(
@@ -134,6 +146,11 @@ def test_create_app_reads_settings_from_the_environment(tmp_path, monkeypatch):
 
 def test_create_app_raises_on_invalid_environment(monkeypatch):
     def invalid_environment():
+        """
+        Stand in for load_settings with an invalid environment.
+
+        :raises ConfigError: always.
+        """
         raise ConfigError(["IS_PROD is required"])
 
     monkeypatch.setattr(

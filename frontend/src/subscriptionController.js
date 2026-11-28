@@ -1,7 +1,8 @@
 /**
  * What happens when someone presses Subscribe (#19), independent of any one view:
  *
- * - Logged in: toggle the subscription record on their PDS and report failures.
+ * - Logged in: save or delete the subscription record in their own account (on their
+ *   PDS, the server that stores it) and report failures.
  * - Logged out: ask them to log in (`requestLogin`), return them to the event, and then
  *   finish the subscription. It only ever subscribes; if they turn out to be subscribed
  *   already (from another device), nothing is toggled off. Cancelling login does nothing.

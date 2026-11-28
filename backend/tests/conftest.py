@@ -1,3 +1,8 @@
+"""
+Shared pytest fixtures: an in-memory SQLite store, the real notifier, an
+event factory and an API test client.
+"""
+
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -18,11 +23,21 @@ MakeEvent = Callable[..., IndexedEvent]
 
 @pytest.fixture
 def now() -> datetime:
+    """
+    The current time, without microseconds (so it survives a round trip).
+
+    :returns: an aware UTC datetime.
+    """
     return datetime.now(UTC).replace(microsecond=0)
 
 
 @pytest.fixture
 def store() -> Iterator[SqliteStore]:
+    """
+    A fresh in-memory SQLite event index for one test.
+
+    :yields: the store; it is closed after the test.
+    """
     sqlite_store = SqliteStore(":memory:")
     yield sqlite_store
     sqlite_store.close()
@@ -30,12 +45,23 @@ def store() -> Iterator[SqliteStore]:
 
 @pytest.fixture
 def notifier(store: SqliteStore) -> SubscriptionNotifier:
+    """
+    The real notifier, writing to the test's store.
+
+    :param store: the test's event index.
+    :returns: the notifier.
+    """
     return SubscriptionNotifier(store)
 
 
 @pytest.fixture
 def make_event(now: datetime) -> MakeEvent:
-    """Build an IndexedEvent; times are hour offsets from `now`."""
+    """
+    A factory that builds IndexedEvents; times are hour offsets from `now`.
+
+    :param now: the test's current time.
+    :returns: the factory function.
+    """
 
     def _make_event(
         rkey: str = "e1",
@@ -51,6 +77,22 @@ def make_event(now: datetime) -> MakeEvent:
         did: str = "did:plc:test",
         **extra: Any,
     ) -> IndexedEvent:
+        """
+        Build one network event for a test.
+
+        :param rkey: the record key, the last part of the event's AT URI.
+        :param name: the event's name.
+        :param start_in_hours: hours from now until it starts.
+        :param end_in_hours: hours from now until it ends.
+        :param tags: its tags.
+        :param group: its group.
+        :param description: its description.
+        :param location: its place name.
+        :param cid: its version fingerprint.
+        :param did: the author's permanent account id.
+        :param extra: other IndexedEvent fields to set, e.g. author_handle.
+        :returns: the event.
+        """
         record = EventRecord(
             name=name,
             description=description,
@@ -79,6 +121,11 @@ def make_event(now: datetime) -> MakeEvent:
 
 @pytest.fixture
 def settings() -> Settings:
+    """
+    Valid backend settings for the API tests, with dev mode on.
+
+    :returns: the settings.
+    """
     return make_test_settings(dev_mode=True)
 
 
@@ -86,6 +133,14 @@ def settings() -> Settings:
 def app(
     store: SqliteStore, notifier: SubscriptionNotifier, settings: Settings
 ) -> FastAPI:
+    """
+    A FastAPI app with the event, meta and subscription routes.
+
+    :param store: the test's event index.
+    :param notifier: the test's notifier.
+    :param settings: the test's settings.
+    :returns: the app, without background loops.
+    """
     app = FastAPI()
     for module in (meta, events, subscriptions):
         app.include_router(module.router)
@@ -97,5 +152,11 @@ def app(
 
 @pytest.fixture
 def client(app: FastAPI) -> Iterator[TestClient]:
+    """
+    An HTTP test client for the app.
+
+    :param app: the app under test.
+    :yields: the client, open for the length of the test.
+    """
     with TestClient(app) as test_client:
         yield test_client

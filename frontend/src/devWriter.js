@@ -1,6 +1,12 @@
 /**
- * "Demo mode" writer: same interface as the atproto writer, but posts Jetstream-shaped
- * commits to POST /api/dev/records under a fake, locally persisted DID.
+ * "Demo mode" writer: same interface as the atproto writer, but needs no account.
+ *
+ * Normally a host's event is saved in their own AT Protocol account, and the backend
+ * hears about it from Jetstream, the live feed of every record change ("commit") on the
+ * network. In demo mode this writer skips both: it builds a message shaped exactly like
+ * a Jetstream commit and posts it to POST /api/dev/records, which feeds it to the backend
+ * as if it came from the network. The fake author is a made-up account id (DID) saved
+ * in localStorage. Terms: docs/projects/triton-event-feed/AT_PROTOCOL_GLOSSARY.md
  * @module devWriter
  */
 import { EVENT_NSID, LISTENER_NSID, buildListenerRecord } from "./records.js";
@@ -13,8 +19,10 @@ let lastTimestampMicros = 0n;
 const clockId = BigInt(Math.floor(Math.random() * 1024));
 
 /**
- * Generate a TID-like record key: 13 chars of base32-sortable encoding of
- * (microsecond timestamp << 10 | clock id). Monotonic within this page.
+ * Generate a record key (a record's name within its type, like a file name) in the
+ * format real accounts use, a "TID" (timestamp id): 13 chars of base32-sortable encoding
+ * of (microsecond timestamp << 10 | clock id), so later keys sort after earlier ones.
+ * Monotonic within this page.
  * @param {number} [nowMs]
  * @returns {string}
  */
@@ -34,10 +42,12 @@ export function generateTimestampRecordKey(nowMs = Date.now()) {
 }
 
 /**
- * Build a Jetstream-shaped commit (see CONTRACTS.md).
+ * Build a message shaped like a Jetstream commit: one record created, updated or deleted
+ * (see CONTRACTS.md).
  * @param {{did: string, operation: 'create'|'update'|'delete', collection: string,
  *   rkey: string, record?: object, nowMs?: number}} commitFields field names
- *   follow Jetstream: `did` is the repo owner's DID, `rkey` the record key
+ *   follow Jetstream: `did` is the account id of the record's owner, `collection` the
+ *   record type (NSID), `rkey` the record key
  * @returns {object}
  */
 export function buildCommit({

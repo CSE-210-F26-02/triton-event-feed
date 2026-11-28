@@ -1,4 +1,6 @@
-"""Builds complete Settings for tests, so no test reads backend/.env."""
+"""
+Builds complete Settings for tests, so no test reads backend/.env.
+"""
 
 from dataclasses import replace
 

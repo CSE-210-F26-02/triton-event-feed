@@ -1,3 +1,9 @@
+"""
+Tests for the Jetstream client (ingest/jetstream.py): filtered URLs,
+cursors, reconnects and the listener-driven posts stream. The WebSocket is
+faked.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -31,10 +37,23 @@ class FakeConnect:
     """
 
     def __init__(self, scripts: list[list[str] | Exception]) -> None:
+        """
+        Queue the scripts, one per connection attempt.
+
+        :param scripts: per connection, the raw messages it delivers or the
+            Exception it raises.
+        """
         self.scripts = scripts
         self.urls: list[str] = []
 
     def __call__(self, url: str) -> Any:
+        """
+        Open a fake connection, like websockets.connect(url).
+
+        :param url: the URL the client asked for; recorded in self.urls.
+        :returns: an async context manager yielding the scripted messages (an
+            empty connection once the scripts run out).
+        """
         self.urls.append(url)
         script = self.scripts.pop(0) if self.scripts else []
         connect_error = script if isinstance(script, Exception) else None
@@ -42,10 +61,21 @@ class FakeConnect:
 
         @asynccontextmanager
         async def connection_context() -> AsyncIterator[AsyncIterator[str]]:
+            """
+            The fake connection's lifetime.
+
+            :yields: the scripted messages, once connected.
+            :raises Exception: the scripted connection error, if there is one.
+            """
             if connect_error is not None:
                 raise connect_error
 
             async def message_stream() -> AsyncIterator[str]:
+                """
+                Deliver the scripted messages, then end like a closed socket.
+
+                :yields: each raw message.
+                """
                 for message in messages:
                     yield message
 
@@ -61,10 +91,22 @@ class StopAfter:
     """
 
     def __init__(self, sleep_limit: int) -> None:
+        """
+        Allow sleep_limit sleeps before stopping the loop.
+
+        :param sleep_limit: how many sleeps to allow.
+        """
         self.sleep_limit = sleep_limit
         self.delays: list[float] = []
 
     async def __call__(self, delay: float) -> None:
+        """
+        Record a delay instead of waiting it out.
+
+        :param delay: the requested delay, in seconds.
+        :raises asyncio.CancelledError: once sleep_limit sleeps were requested,
+            which ends the client's reconnect loop.
+        """
         self.delays.append(delay)
         await asyncio.sleep(0)  # yield like a real sleep
         if len(self.delays) >= self.sleep_limit:
@@ -74,6 +116,13 @@ class StopAfter:
 def make_client(
     connect: FakeConnect, sleep: StopAfter | None = None
 ) -> tuple[JetstreamClient, FakeStore]:
+    """
+    Build a JetstreamClient wired to fakes.
+
+    :param connect: the fake WebSocket connector.
+    :param sleep: the fake sleep (default: stop after one sleep).
+    :returns: (the client, the fake store it reads and writes).
+    """
     store = FakeStore()
     processor = CommitProcessor(store, FakeNotifier(store))
     client = JetstreamClient(
@@ -87,6 +136,13 @@ def make_client(
 
 
 def event_message(rkey: str, time_us: int) -> str:
+    """
+    Build one raw Jetstream message that creates an event record.
+
+    :param rkey: the record key of the new event.
+    :param time_us: the message's timestamp (becomes the cursor).
+    :returns: the message as JSON text.
+    """
     record = {
         "name": "Taco Night",
         "startsAt": "2026-11-12T18:00:00Z",
@@ -111,6 +167,12 @@ def event_message(rkey: str, time_us: int) -> str:
 
 
 def query(url: str) -> dict[str, list[str]]:
+    """
+    Read the query-string filters of a Jetstream URL.
+
+    :param url: a URL built by JetstreamClient.build_url.
+    :returns: every value by parameter name.
+    """
     return parse_qs(urlsplit(url).query)
 
 
@@ -199,6 +261,12 @@ async def test_processor_errors_do_not_drop_connection() -> None:
     client, store = make_client(connect)
 
     async def failing_handle(message: dict[str, Any]) -> None:
+        """
+        Stand in for a processor whose database is down.
+
+        :param message: the message it was asked to handle.
+        :raises RuntimeError: always.
+        """
         raise RuntimeError("db down")
 
     client.processor.handle = failing_handle  # type: ignore[method-assign]

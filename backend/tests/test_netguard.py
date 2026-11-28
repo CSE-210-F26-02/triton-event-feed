@@ -1,10 +1,30 @@
+"""
+Tests for the SSRF guard (utils/netguard.py), which refuses URLs that
+point at private or local hosts.
+"""
+
 import socket
 
 from utils.netguard import is_public_url
 
 
 def fake_resolver(ip_address: str):
+    """
+    Build a fake socket.getaddrinfo that resolves every host to one address.
+
+    :param ip_address: the address every host resolves to.
+    :returns: the fake resolver.
+    """
+
     def resolve(host, port, proto=0):
+        """
+        Resolve any host to the fixed address.
+
+        :param host: ignored.
+        :param port: the port, passed through.
+        :param proto: the protocol, passed through.
+        :returns: one getaddrinfo-style result.
+        """
         return [
             (socket.AF_INET, socket.SOCK_STREAM, proto, "", (ip_address, port))
         ]
@@ -36,6 +56,13 @@ def test_non_http_scheme_rejected():
 
 def test_unresolvable_host_rejected():
     def failing_resolve(*args, **kwargs):
+        """
+        Fail like a DNS lookup for a host that does not exist.
+
+        :param args: ignored.
+        :param kwargs: ignored.
+        :raises OSError: always.
+        """
         raise OSError("nope")
 
     assert not is_public_url("https://nope.invalid/", failing_resolve)

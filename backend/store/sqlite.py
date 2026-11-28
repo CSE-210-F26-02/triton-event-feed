@@ -131,7 +131,13 @@ INSERT_EVENT_SQL = (
 
 
 def _coordinates(record: EventRecord) -> tuple[float | None, float | None]:
-    """Return the event's (lat, lng) as floats, or (None, None)."""
+    """
+    Return the event's position as numbers.
+
+    :param record: the event's content.
+    :returns: (latitude, longitude) as floats, or (None, None) when the
+        event has no coordinates.
+    """
     if record.location.lat is None or record.location.lng is None:
         return None, None
     lat, lng = float(record.location.lat), float(record.location.lng)
@@ -142,9 +148,13 @@ def _coordinates(record: EventRecord) -> tuple[float | None, float | None]:
 
 def to_iso(moment: datetime) -> str:
     """
-    Fixed-width UTC ISO string (lexicographic order == chronological).
+    Format a time as a fixed-width UTC ISO string.
 
-    Naive datetimes are treated as UTC.
+    Fixed width means sorting the strings sorts the times, so SQLite can
+    compare them as text. Naive datetimes are treated as UTC.
+
+    :param moment: the time to format.
+    :returns: e.g. "2026-12-01T18:00:00.000000+00:00".
     """
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=UTC)
@@ -152,12 +162,24 @@ def to_iso(moment: datetime) -> str:
 
 
 def from_iso(text: str) -> datetime:
-    """Parse a string written by to_iso."""
+    """
+    Parse a string written by to_iso.
+
+    :param text: the stored time.
+    :returns: the time, in UTC.
+    """
     return datetime.fromisoformat(text)
 
 
 def encode_cursor(sort: SortOrder, timestamp: str, uri: str) -> str:
-    """Build the opaque paging cursor for the last row of a page."""
+    """
+    Build the opaque paging cursor for the last row of a page.
+
+    :param sort: the sort order the page was built with.
+    :param timestamp: the last row's sort value (to_iso format).
+    :param uri: the last row's AT URI, which breaks ties.
+    :returns: a URL-safe base64 string.
+    """
     decoded_cursor = CURSOR_SEPARATOR.join((sort, timestamp, uri))
     return base64.urlsafe_b64encode(decoded_cursor.encode()).decode()
 
@@ -166,8 +188,12 @@ def decode_cursor(
     cursor: str, expected_sort: SortOrder = "soonest"
 ) -> tuple[str, str]:
     """
-    Return (timestamp, uri) from a cursor made by encode_cursor.
+    Read back a cursor made by encode_cursor.
 
+    :param cursor: the cursor from the client (untrusted).
+    :param expected_sort: the sort order of the current query; a cursor
+        from another sort order is refused.
+    :returns: (timestamp, uri) of the row to resume after.
     :raises ValueError: on a malformed cursor or a sort-mode mismatch.
     """
     try:
@@ -181,25 +207,47 @@ def decode_cursor(
 
 
 def _normalize_tag(tag: str) -> str:
-    """Lower-case a tag and strip whitespace and a leading "#"."""
+    """
+    Lower-case a tag and strip whitespace and a leading "#".
+
+    :param tag: the tag as typed.
+    :returns: the tag as stored.
+    """
     return tag.strip().lstrip(HASHTAG_PREFIX).lower()
 
 
 def _search_text(record: EventRecord) -> str:
-    """The lower-cased text that ?q= searches (name, description, place)."""
+    """
+    Build the lower-cased text that ?q= searches.
+
+    :param record: the event's content.
+    :returns: its name, description and place name, one per line.
+    """
     fields = [record.name, record.description, record.location.name]
     return "\n".join(fields).lower()
 
 
 def _record_json(record: EventRecord) -> str:
-    """Serialise a record exactly as the lexicon spells it (camelCase)."""
+    """
+    Serialise a record exactly as its schema (lexicon) spells it.
+
+    :param record: the event's content.
+    :returns: the record as camelCase JSON, as stored in the host's account.
+    """
     return record.model_dump_json(by_alias=True)
 
 
 def _event_row(
     event: IndexedEvent, record_json: str, indexed_at: str
 ) -> tuple[Any, ...]:
-    """Column values for INSERT_EVENT_SQL, in column order."""
+    """
+    Column values for INSERT_EVENT_SQL, in column order.
+
+    :param event: the event to store.
+    :param record_json: event.record serialised by _record_json.
+    :param indexed_at: when the event was first stored (to_iso format).
+    :returns: the values to bind to the INSERT statement.
+    """
     record = event.record
     lat, lng = _coordinates(record)
     return (
@@ -222,7 +270,12 @@ def _event_row(
 
 
 def _bbox_clauses(query: EventQuery) -> tuple[list[str], list[Any]]:
-    """WHERE clauses and parameters for the ?bbox= filter."""
+    """
+    WHERE clauses and parameters for the ?bbox= (map area) filter.
+
+    :param query: the query, whose bbox may be None.
+    :returns: (clauses, parameters); both empty when there is no bbox.
+    """
     bbox = query.bbox
     if bbox is None:
         return [], []
@@ -239,7 +292,13 @@ def _bbox_clauses(query: EventQuery) -> tuple[list[str], list[Any]]:
 def _filter_clauses(
     query: EventQuery, now: datetime
 ) -> tuple[list[str], list[Any]]:
-    """WHERE clauses and parameters for every filter in query."""
+    """
+    WHERE clauses and parameters for every filter in a query.
+
+    :param query: the filters to apply.
+    :param now: the current time, used when query.ends_after is not set.
+    :returns: (clauses, parameters) to AND together.
+    """
     where = ["ends_at >= ?"]
     params: list[Any] = [to_iso(query.ends_after or now)]
     tags = [tag for tag in (_normalize_tag(tag) for tag in query.tags) if tag]
@@ -264,7 +323,13 @@ def _filter_clauses(
 
 
 def _cursor_clauses(query: EventQuery) -> tuple[list[str], list[Any]]:
-    """WHERE clause and parameters that resume after query.cursor."""
+    """
+    WHERE clause and parameters that resume after query.cursor.
+
+    :param query: the query, whose cursor may be None.
+    :returns: (clauses, parameters); both empty on the first page.
+    :raises ValueError: when the cursor is malformed.
+    """
     if not query.cursor:
         return [], []
     after_timestamp, after_uri = decode_cursor(query.cursor, query.sort)
@@ -275,7 +340,12 @@ def _cursor_clauses(query: EventQuery) -> tuple[list[str], list[Any]]:
 
 
 def _purge(connection: sqlite3.Connection, uris: list[str]) -> None:
-    """Delete these events and every row that references them."""
+    """
+    Delete these events and every row that references them.
+
+    :param connection: the connection of the open transaction.
+    :param uris: the ids (AT URIs) of the events to delete.
+    """
     params = [(uri,) for uri in uris]
     for table, column in EVENT_TABLES:
         connection.executemany(
@@ -307,7 +377,12 @@ def _row_to_event(row: sqlite3.Row) -> IndexedEvent:
 
 
 def _row_to_update(row: sqlite3.Row) -> EventUpdate:
-    """Build an EventUpdate from an ``updates`` table row."""
+    """
+    Build an EventUpdate from an ``updates`` table row.
+
+    :param row: one row of the updates table.
+    :returns: the announcement.
+    """
     return EventUpdate(
         event_uri=row["event_uri"],
         text=row["text"],
@@ -317,7 +392,12 @@ def _row_to_update(row: sqlite3.Row) -> EventUpdate:
 
 
 def _row_to_listener(row: sqlite3.Row) -> Listener:
-    """Build a Listener from a ``listeners`` table row."""
+    """
+    Build a Listener from a ``listeners`` table row.
+
+    :param row: one row of the listeners table.
+    :returns: the listener.
+    """
     return Listener(
         uri=row["uri"],
         author_did=row["author_did"],
@@ -326,7 +406,12 @@ def _row_to_listener(row: sqlite3.Row) -> Listener:
 
 
 def _row_to_notification(row: sqlite3.Row) -> Notification:
-    """Build a Notification from a ``notifications`` table row."""
+    """
+    Build a Notification from a ``notifications`` table row.
+
+    :param row: one row of the notifications table.
+    :returns: the notification.
+    """
     return Notification(
         id=row["id"],
         subscriber_id=row["subscriber_id"],
@@ -338,7 +423,9 @@ def _row_to_notification(row: sqlite3.Row) -> Notification:
 
 
 class SqliteStore:
-    """EventStore backed by one SQLite file (or ":memory:")."""
+    """
+    EventStore backed by one SQLite file (or ":memory:").
+    """
 
     def __init__(self, path: str) -> None:
         """
@@ -355,27 +442,46 @@ class SqliteStore:
         self._connection.executescript(SCHEMA)
 
     def close(self) -> None:
-        """Close the database connection."""
+        """
+        Close the database connection.
+        """
         with self._lock:
             self._connection.close()
 
     @contextmanager
     def _transaction(self) -> Iterator[sqlite3.Connection]:
-        """Run the block in one transaction, holding the lock."""
+        """
+        Run the block in one transaction, holding the lock.
+
+        :yields: the connection; changes are committed when the block ends and
+            rolled back if it raises.
+        """
         with self._lock, self._connection:
             yield self._connection
 
     def _fetch_all(
         self, sql: str, params: tuple[Any, ...] | list[Any] = ()
     ) -> list[sqlite3.Row]:
-        """Run a query and return every row."""
+        """
+        Run a query and return every row.
+
+        :param sql: the SELECT statement, with ? placeholders.
+        :param params: the values for the placeholders.
+        :returns: the rows.
+        """
         with self._lock:
             return self._connection.execute(sql, params).fetchall()
 
     def _fetch_one(
         self, sql: str, params: tuple[Any, ...] = ()
     ) -> sqlite3.Row | None:
-        """Run a query and return the first row, or None."""
+        """
+        Run a query and return its first row.
+
+        :param sql: the SELECT statement, with ? placeholders.
+        :param params: the values for the placeholders.
+        :returns: the first row, or None when there are none.
+        """
         with self._lock:
             return self._connection.execute(sql, params).fetchone()
 
@@ -385,7 +491,9 @@ class SqliteStore:
         """
         Insert or replace an event, keeping its first indexed_at.
 
-        :returns: "unchanged" when cid and record match the stored copy,
+        :param event: the event to store.
+        :returns: "unchanged" when the record and its version fingerprint
+            (cid) match the stored copy,
             otherwise "created" or "updated".
         """
         record_json = _record_json(event.record)
@@ -418,14 +526,23 @@ class SqliteStore:
         return "created" if row is None else "updated"
 
     def get_event(self, uri: str) -> IndexedEvent | None:
-        """Return the event with this URI, or None."""
+        """
+        Look up one event.
+
+        :param uri: the event's id (its AT URI).
+        :returns: the event, or None when it is not in the index.
+        """
         row = self._fetch_one("SELECT * FROM events WHERE uri = ?", (uri,))
         return _row_to_event(row) if row is not None else None
 
     def delete_event(self, uri: str) -> bool:
         """
-        Also drops tags, updates and subscriptions: publish "deleted"
-        before calling.
+        Delete an event and everything attached to it (tags, announcements,
+        subscriptions). Publish the "deleted" notification before calling,
+        while the subscribers can still be looked up.
+
+        :param uri: the event's id (its AT URI).
+        :returns: True when the event existed.
         """
         with self._transaction() as connection:
             existed = connection.execute(
@@ -436,8 +553,16 @@ class SqliteStore:
 
     def query_events(self, query: EventQuery, now: datetime) -> Page:
         """
-        Return one page of events matching query (keyset paginated).
+        Return one page of the events that match a query.
 
+        Paging is keyset-based: the cursor holds the sort value and AT URI of
+        the last row, so pages stay stable while events are added.
+
+        Events that ended before query.ends_after (default: now) are hidden.
+
+        :param query: the filters, sort order, page size and paging cursor.
+        :param now: the current time, used when query.ends_after is not set.
+        :returns: the page of events and the cursor for the next page.
         :raises ValueError: when query.cursor is malformed.
         """
         filter_where, filter_params = _filter_clauses(query, now)
@@ -462,7 +587,12 @@ class SqliteStore:
         return Page(events=events, cursor=next_cursor)
 
     def delete_expired(self, cutoff: datetime) -> list[str]:
-        """Delete events whose endsAt < cutoff; return their URIs."""
+        """
+        Delete every event that ended before a cutoff.
+
+        :param cutoff: events whose endsAt is earlier than this are deleted.
+        :returns: the ids (AT URIs) of the deleted events.
+        """
         with self._transaction() as connection:
             rows = connection.execute(
                 "SELECT uri FROM events WHERE ends_at < ?", (to_iso(cutoff),)
@@ -472,7 +602,12 @@ class SqliteStore:
         return uris
 
     def list_tags(self, now: datetime) -> list[Count]:
-        """Count visible events per tag, most used first."""
+        """
+        Count the events that are still visible, per tag.
+
+        :param now: the current time; events that have ended are not counted.
+        :returns: one Count per tag, most used first.
+        """
         return self._counts(
             "SELECT t.tag AS value, COUNT(*) AS n FROM event_tags t"
             " JOIN events e ON e.uri = t.uri WHERE e.ends_at >= ?"
@@ -481,7 +616,12 @@ class SqliteStore:
         )
 
     def list_groups(self, now: datetime) -> list[Count]:
-        """Count visible events per group, most used first."""
+        """
+        Count the events that are still visible, per group.
+
+        :param now: the current time; events that have ended are not counted.
+        :returns: one Count per group, most used first.
+        """
         return self._counts(
             "SELECT grp AS value, COUNT(*) AS n FROM events"
             " WHERE ends_at >= ? AND grp IS NOT NULL AND grp != ''"
@@ -490,14 +630,24 @@ class SqliteStore:
         )
 
     def _counts(self, sql: str, now: datetime) -> list[Count]:
-        """Run a (value, n) counting query for events visible at now."""
+        """
+        Run a (value, n) counting query for the events visible at a time.
+
+        :param sql: the query; its one ? placeholder is the current time.
+        :param now: the current time.
+        :returns: one Count per value.
+        """
         rows = self._fetch_all(sql, (to_iso(now),))
         return [Count(value=row["value"], count=row["n"]) for row in rows]
 
     # updates
 
     def add_update(self, update: EventUpdate) -> None:
-        """Store an announcement for an event."""
+        """
+        Store an announcement for an event.
+
+        :param update: the announcement, e.g. from a host's Bluesky post.
+        """
         with self._transaction() as connection:
             connection.execute(
                 "INSERT INTO updates (event_uri, text, source_uri,"
@@ -511,7 +661,12 @@ class SqliteStore:
             )
 
     def list_updates(self, event_uri: str) -> list[EventUpdate]:
-        """Return an event's announcements, oldest first."""
+        """
+        Return an event's announcements, oldest first.
+
+        :param event_uri: the event's id (its AT URI).
+        :returns: the announcements.
+        """
         rows = self._fetch_all(
             "SELECT * FROM updates WHERE event_uri = ?"
             " ORDER BY created_at, id",
@@ -522,7 +677,11 @@ class SqliteStore:
     # listeners
 
     def upsert_listener(self, listener: Listener) -> None:
-        """Insert or replace a listener record."""
+        """
+        Insert or replace a listener record.
+
+        :param listener: the listener to store.
+        """
         with self._transaction() as connection:
             connection.execute(
                 "INSERT OR REPLACE INTO listeners (uri, author_did, record)"
@@ -535,7 +694,12 @@ class SqliteStore:
             )
 
     def delete_listener(self, uri: str) -> bool:
-        """Delete a listener; return whether it existed."""
+        """
+        Delete a listener.
+
+        :param uri: the listener record's AT URI.
+        :returns: True when the listener existed.
+        """
         with self._transaction() as connection:
             cursor = connection.execute(
                 "DELETE FROM listeners WHERE uri = ?", (uri,)
@@ -543,7 +707,12 @@ class SqliteStore:
             return cursor.rowcount > 0
 
     def listeners_for_did(self, did: str) -> list[Listener]:
-        """Return every listener created by this DID."""
+        """
+        Return every listener created by one host.
+
+        :param did: the host's permanent account id.
+        :returns: their listeners, ordered by AT URI.
+        """
         rows = self._fetch_all(
             "SELECT * FROM listeners WHERE author_did = ? ORDER BY uri",
             (did,),
@@ -551,7 +720,14 @@ class SqliteStore:
         return [_row_to_listener(row) for row in rows]
 
     def listener_dids(self) -> list[str]:
-        """Return every DID that has at least one listener."""
+        """
+        Return the account id (DID) of every host with a listener.
+
+        The Jetstream client follows the Bluesky posts of exactly these
+        accounts.
+
+        :returns: the DIDs, sorted.
+        """
         rows = self._fetch_all(
             "SELECT DISTINCT author_did FROM listeners ORDER BY author_did"
         )
@@ -560,7 +736,12 @@ class SqliteStore:
     # subscriptions
 
     def subscribe(self, subscriber_id: str, event_uri: str) -> None:
-        """Subscribe a client to an event (idempotent)."""
+        """
+        Subscribe a client to an event (idempotent).
+
+        :param subscriber_id: the client's opaque id.
+        :param event_uri: the event's id (its AT URI).
+        """
         with self._transaction() as connection:
             connection.execute(
                 "INSERT OR IGNORE INTO subscriptions (subscriber_id,"
@@ -569,7 +750,12 @@ class SqliteStore:
             )
 
     def unsubscribe(self, subscriber_id: str, event_uri: str) -> None:
-        """Unsubscribe a client from an event (idempotent)."""
+        """
+        Unsubscribe a client from an event (idempotent).
+
+        :param subscriber_id: the client's opaque id.
+        :param event_uri: the event's id (its AT URI).
+        """
         with self._transaction() as connection:
             connection.execute(
                 "DELETE FROM subscriptions"
@@ -578,7 +764,12 @@ class SqliteStore:
             )
 
     def subscribers_of(self, event_uri: str) -> list[str]:
-        """Return every client subscribed to an event."""
+        """
+        Return every client subscribed to an event.
+
+        :param event_uri: the event's id (its AT URI).
+        :returns: the subscriber ids, sorted.
+        """
         rows = self._fetch_all(
             "SELECT subscriber_id FROM subscriptions WHERE event_uri = ?"
             " ORDER BY subscriber_id",
@@ -587,7 +778,12 @@ class SqliteStore:
         return [row["subscriber_id"] for row in rows]
 
     def subscriptions_of(self, subscriber_id: str) -> list[str]:
-        """Return every event a client is subscribed to."""
+        """
+        Return every event a client is subscribed to.
+
+        :param subscriber_id: the client's opaque id.
+        :returns: the events' ids (AT URIs), sorted.
+        """
         rows = self._fetch_all(
             "SELECT event_uri FROM subscriptions WHERE subscriber_id = ?"
             " ORDER BY event_uri",
@@ -598,7 +794,12 @@ class SqliteStore:
     # notifications
 
     def add_notification(self, notification: Notification) -> Notification:
-        """Persist a notification and return it with its new id."""
+        """
+        Save a notification.
+
+        :param notification: the notification to save (its id is ignored).
+        :returns: the saved notification, with its new id set.
+        """
         with self._transaction() as connection:
             cursor = connection.execute(
                 "INSERT INTO notifications (subscriber_id, event_uri, kind,"
@@ -616,7 +817,13 @@ class SqliteStore:
     def list_notifications(
         self, subscriber_id: str, since_id: int = 0
     ) -> list[Notification]:
-        """Return a client's notifications with id > since_id."""
+        """
+        Return a client's notifications newer than since_id, oldest first.
+
+        :param subscriber_id: the client's opaque id.
+        :param since_id: the id of the last notification the client has seen.
+        :returns: the notifications with an id greater than since_id.
+        """
         rows = self._fetch_all(
             "SELECT * FROM notifications WHERE subscriber_id = ? AND id > ?"
             " ORDER BY id",
@@ -627,14 +834,24 @@ class SqliteStore:
     # ingest cursors
 
     def get_cursor(self, name: str) -> int | None:
-        """Return a saved ingest cursor, or None."""
+        """
+        Return a saved ingest cursor.
+
+        :param name: the cursor's name, e.g. "jetstream".
+        :returns: the saved position, or None when nothing was saved yet.
+        """
         row = self._fetch_one(
             "SELECT value FROM cursors WHERE name = ?", (name,)
         )
         return row["value"] if row is not None else None
 
     def set_cursor(self, name: str, value: int) -> None:
-        """Save an ingest cursor."""
+        """
+        Save an ingest cursor: how far through a live feed we have read.
+
+        :param name: the cursor's name, e.g. "jetstream".
+        :param value: the position, e.g. a Jetstream time_us.
+        """
         with self._transaction() as connection:
             connection.execute(
                 "INSERT OR REPLACE INTO cursors (name, value) VALUES (?, ?)",

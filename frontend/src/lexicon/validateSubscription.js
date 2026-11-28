@@ -1,11 +1,16 @@
 /**
  * Validator and builder for app.communitymap.subscription records (#19).
  *
- * The schema lives in lexicons/app/communitymap/subscription.json at the repo root and
- * is read through the shared registry (registry.js), so this can never drift from it.
- * A subscription is stored on the subscriber's own PDS and points at the event with a
- * com.atproto.repo.strongRef (the event's URI + the CID of the version the user saw).
- * Like every AT Protocol record it is public; the UI says so next to the Subscribe button.
+ * A subscription record means "notify me when this event changes". It is saved in the
+ * subscriber's own AT Protocol account (on their PDS, the server that stores it), not in
+ * our database. Its schema, its "lexicon", lives in
+ * lexicons/app/communitymap/subscription.json at the repo root and is read through the
+ * shared registry (registry.js), so this can never drift from it.
+ *
+ * The record points at the event with a "strongRef" (com.atproto.repo.strongRef):
+ * {uri, cid}, the event record's address (AT URI) plus a fingerprint (CID) of the exact
+ * version the user saw. Like every AT Protocol record it is public; the UI says so next
+ * to the Subscribe button. Terms: docs/projects/triton-event-feed/AT_PROTOCOL_GLOSSARY.md
  *
  * Validation happens in two stages, like validateEvent.js:
  *   1. Lexicon rules (required fields, strongRef shape, at-uri / cid / datetime formats)
@@ -62,8 +67,8 @@ function subjectCollectionIssues(record) {
 /**
  * Validates an app.communitymap.subscription record.
  *
- * @param {unknown} record The record to check (before createRecord, or one listed
- *   from a PDS).
+ * @param {unknown} record The record to check (before saving it with createRecord, or
+ *   one read back from a user's account).
  * @returns {ValidationResult} { ok: true } if valid; otherwise { ok: false, errors }.
  *
  * @example

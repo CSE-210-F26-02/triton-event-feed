@@ -59,7 +59,9 @@ EXPIRY_INTERVAL_SECONDS = "EXPIRY_INTERVAL_SECONDS"
 EXPIRY_GRACE_SECONDS = "EXPIRY_GRACE_SECONDS"
 EXPIRY_PURGE_DAYS = "EXPIRY_PURGE_DAYS"
 
-# Defaults for the optional variables.
+# Defaults for the optional variables. Jetstream is the public live feed of
+# AT Protocol record changes (see ingest/jetstream.py); this is one of
+# Bluesky's public instances.
 DEFAULT_JETSTREAM_URL = "wss://jetstream2.us-east.bsky.network/subscribe"
 DEFAULT_ICAL_INTERVAL_SECONDS = 900
 DEFAULT_EXPIRY_INTERVAL_SECONDS = 60
@@ -132,10 +134,12 @@ class Settings:
     :ivar log_level: logging level name, e.g. "INFO".
     :ivar database_path: SQLite file path, or ":memory:" for tests.
     :ivar frontend_dir: folder of static frontend files served at "/".
-    :ivar dev_mode: True exposes POST /api/dev/records, which simulates
-        firehose commits locally (demo mode).
-    :ivar jetstream_enabled: True indexes live records from Jetstream; False
-        indexes only via dev mode and iCal imports.
+    :ivar dev_mode: True exposes POST /api/dev/records, which pretends a
+        record change arrived from the network (demo mode).
+    :ivar jetstream_enabled: True indexes the events users publish on the
+        AT Protocol network, read live from Jetstream (a public feed of
+        every record change); False indexes only via dev mode and iCal
+        imports.
     :ivar jetstream_url: Jetstream WebSocket endpoint (ws:// or wss://).
     :ivar ical_feed_urls: iCal feed URLs polled in the background.
     :ivar ical_interval_seconds: seconds between iCal polling rounds.
@@ -189,7 +193,15 @@ def _optional(environ: Environ, name: str) -> str | None:
 
 
 def _require(environ: Environ, name: str, problems: list[str]) -> str | None:
-    """Return a variable's trimmed value, or record a problem and None."""
+    """
+    Read a required variable.
+
+    :param environ: where to read variables from (e.g. os.environ).
+    :param name: the variable's name.
+    :param problems: collects a message for each invalid variable.
+    :returns: its trimmed value, or None (and a problem) when it is
+        missing or empty.
+    """
     value = _optional(environ, name)
     if value is None:
         problems.append(f"{name} is required")
@@ -199,7 +211,15 @@ def _require(environ: Environ, name: str, problems: list[str]) -> str | None:
 def _parse_bool(
     environ: Environ, name: str, problems: list[str]
 ) -> bool | None:
-    """Parse a true/false variable (true/false, 1/0, yes/no; any case)."""
+    """
+    Parse a true/false variable (true/false, 1/0, yes/no; any case).
+
+    :param environ: where to read variables from (e.g. os.environ).
+    :param name: the variable's name.
+    :param problems: collects a message for each invalid variable.
+    :returns: the value, or None (and a problem) when it is missing or
+        not a boolean.
+    """
     value = _require(environ, name, problems)
     if value is None:
         return None
@@ -224,7 +244,12 @@ def _has_scheme_and_host(value: str, allowed_schemes: set[str]) -> bool:
 
 
 def _split_list(value: str) -> list[str]:
-    """Split a comma-separated value into trimmed, non-empty parts."""
+    """
+    Split a comma-separated value into trimmed, non-empty parts.
+
+    :param value: e.g. "a, b,,c".
+    :returns: e.g. ["a", "b", "c"].
+    """
     parts = value.split(_LIST_SEPARATOR)
     return [part.strip() for part in parts if part.strip()]
 
@@ -232,7 +257,14 @@ def _split_list(value: str) -> list[str]:
 def _parse_origins(
     environ: Environ, name: str, problems: list[str]
 ) -> list[str] | None:
-    """Parse a comma-separated list of http(s) origins, or "*"."""
+    """
+    Parse a comma-separated list of http(s) origins, or "*".
+
+    :param environ: where to read variables from (e.g. os.environ).
+    :param name: the variable's name.
+    :param problems: collects a message for each invalid variable.
+    :returns: the origins, or None (and a problem) when one is invalid.
+    """
     value = _require(environ, name, problems)
     if value is None:
         return None
@@ -256,7 +288,14 @@ def _parse_origins(
 def _parse_port(
     environ: Environ, name: str, problems: list[str]
 ) -> int | None:
-    """Parse a TCP port number (1-65535)."""
+    """
+    Parse a TCP port number (1-65535).
+
+    :param environ: where to read variables from (e.g. os.environ).
+    :param name: the variable's name.
+    :param problems: collects a message for each invalid variable.
+    :returns: the port, or None (and a problem) when it is invalid.
+    """
     value = _require(environ, name, problems)
     if value is None:
         return None
@@ -272,7 +311,15 @@ def _parse_port(
 def _parse_log_level(
     environ: Environ, name: str, problems: list[str]
 ) -> str | None:
-    """Parse a logging level name such as INFO (any case)."""
+    """
+    Parse a logging level name such as INFO (any case).
+
+    :param environ: where to read variables from (e.g. os.environ).
+    :param name: the variable's name.
+    :param problems: collects a message for each invalid variable.
+    :returns: the upper-cased level, e.g. "INFO", or None (and a
+        problem) when it is not a level.
+    """
     value = _require(environ, name, problems)
     if value is None:
         return None
@@ -316,7 +363,15 @@ def _parse_optional_integer(
 def _parse_optional_jetstream_url(
     environ: Environ, name: str, problems: list[str]
 ) -> str | None:
-    """Parse the optional Jetstream WebSocket URL (ws:// or wss://)."""
+    """
+    Parse the optional Jetstream WebSocket URL (ws:// or wss://).
+
+    :param environ: where to read variables from (e.g. os.environ).
+    :param name: the variable's name.
+    :param problems: collects a message for each invalid variable.
+    :returns: the URL, DEFAULT_JETSTREAM_URL when unset, or None (and a
+        problem) when it is invalid.
+    """
     value = _optional(environ, name)
     if value is None:
         return DEFAULT_JETSTREAM_URL
@@ -329,7 +384,15 @@ def _parse_optional_jetstream_url(
 def _parse_optional_feed_urls(
     environ: Environ, name: str, problems: list[str]
 ) -> list[str] | None:
-    """Parse an optional comma-separated list of http(s) iCal feed URLs."""
+    """
+    Parse an optional comma-separated list of http(s) iCal feed URLs.
+
+    :param environ: where to read variables from (e.g. os.environ).
+    :param name: the variable's name.
+    :param problems: collects a message for each invalid variable.
+    :returns: the URLs, [] when unset, or None (and a problem) when one
+        is invalid.
+    """
     value = _optional(environ, name)
     if value is None:
         return []
@@ -352,12 +415,19 @@ def _cors_origins(
     environ: Environ, is_prod: bool | None, problems: list[str]
 ) -> list[str] | None:
     """
+    Choose which web origins may call the API.
+
     Production allows only PRODUCTION_SITE_URL; development uses
     DEV_CORS_ORIGINS (often "*"). The wildcard is refused in production.
 
     PRODUCTION_SITE_URL is optional: when unset, no other origin may call
     the API (SAME_ORIGIN_ONLY). The frontend this server hosts itself is
     same-origin, so it keeps working without any CORS origin.
+
+    :param environ: where to read variables from (e.g. os.environ).
+    :param is_prod: the parsed IS_PROD, or None when it was invalid.
+    :param problems: collects a message for each invalid variable.
+    :returns: the allowed origins, or None when they cannot be decided.
     """
     if is_prod is None:
         return None
@@ -374,7 +444,13 @@ def _cors_origins(
 def _server_settings(
     environ: Environ, problems: list[str]
 ) -> dict[str, object]:
-    """Parse the settings for the web server itself (CORS, host, logs)."""
+    """
+    Parse the settings for the web server itself (CORS, host, logs).
+
+    :param environ: where to read variables from (e.g. os.environ).
+    :param problems: collects a message for each invalid variable.
+    :returns: Settings field values by field name (None where invalid).
+    """
     is_prod = _parse_bool(environ, IS_PROD, problems)
     return {
         "is_prod": is_prod,
@@ -391,7 +467,13 @@ def _server_settings(
 def _ingest_settings(
     environ: Environ, problems: list[str]
 ) -> dict[str, object]:
-    """Parse the settings for Jetstream and iCal ingestion."""
+    """
+    Parse the settings for Jetstream and iCal ingestion.
+
+    :param environ: where to read variables from (e.g. os.environ).
+    :param problems: collects a message for each invalid variable.
+    :returns: Settings field values by field name (None where invalid).
+    """
     return {
         "jetstream_enabled": _parse_bool(environ, JETSTREAM_ENABLED, problems),
         "jetstream_url": _parse_optional_jetstream_url(
@@ -413,7 +495,13 @@ def _ingest_settings(
 def _expiry_settings(
     environ: Environ, problems: list[str]
 ) -> dict[str, object]:
-    """Parse the settings for the background expiry sweep."""
+    """
+    Parse the settings for the background expiry sweep.
+
+    :param environ: where to read variables from (e.g. os.environ).
+    :param problems: collects a message for each invalid variable.
+    :returns: Settings field values by field name (None where invalid).
+    """
     return {
         "expiry_interval_seconds": _parse_optional_integer(
             environ,

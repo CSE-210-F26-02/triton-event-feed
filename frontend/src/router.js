@@ -1,7 +1,10 @@
 /**
  * Hash-based routing so every event has a shareable URL that works on static hosting
- * (no server rewrites needed). Event routes look like `#/event/<repo DID>/<record key>`; the
- * collection is always EVENT_NSID, so the AT URI can be rebuilt from the hash alone.
+ * (no server rewrites needed). Event routes look like `#/event/<host DID>/<record key>`:
+ * the host's permanent account id and the event record's name in their account. The
+ * record type is always EVENT_NSID, so the event's full address (its AT URI,
+ * at://<DID>/<type>/<record key>) can be rebuilt from the hash alone. Terms:
+ * docs/projects/triton-event-feed/AT_PROTOCOL_GLOSSARY.md
  * `#/subscriptions` is the signed-in user's "My subscriptions" page (#19).
  * Hashes that are not routes (e.g. the "#main" skip link) are ignored.
  * @module router

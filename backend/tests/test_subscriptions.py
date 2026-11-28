@@ -1,3 +1,8 @@
+"""
+Tests for the subscription and notification routes
+(api/subscriptions.py), including the live SSE stream.
+"""
+
 import asyncio
 
 from api.subscriptions import sse_messages
@@ -9,6 +14,13 @@ SUBSCRIBER_ID = "subscriber-123"
 def subscription_body(
     uri: str, subscriber_id: str = SUBSCRIBER_ID
 ) -> dict[str, str]:
+    """
+    Build a POST /api/subscriptions JSON body.
+
+    :param uri: the event's id (its AT URI).
+    :param subscriber_id: the client's opaque id.
+    :returns: the body.
+    """
     return {"subscriberId": subscriber_id, "eventUri": uri}
 
 
@@ -117,6 +129,11 @@ async def test_sse_messages_stream(store, notifier):
     disconnected = False
 
     async def is_disconnected() -> bool:
+        """
+        Report whether the fake client has left.
+
+        :returns: the test's `disconnected` flag.
+        """
         return disconnected
 
     sse_stream = sse_messages(
@@ -146,6 +163,11 @@ async def test_sse_messages_stream(store, notifier):
 
 async def test_sse_releases_queue_on_close(notifier):
     async def never() -> bool:
+        """
+        A client that never disconnects on its own.
+
+        :returns: False.
+        """
         return False
 
     sse_stream = sse_messages(

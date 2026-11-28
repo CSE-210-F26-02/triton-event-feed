@@ -1,6 +1,11 @@
 """
 Sample UCSD campus events for local development.
 
+Each sample is stored as if a campus account had published it on the AT
+Protocol network: it gets a made-up author account id (DID, e.g.
+"did:plc:seedtritonfood"), username (handle) and record address (AT URI).
+See docs/projects/triton-event-feed/AT_PROTOCOL_GLOSSARY.md.
+
 Run from the backend/ folder: python seed.py
 """
 
@@ -27,10 +32,11 @@ PLACES: dict[str, tuple[str, str, str]] = {
 }
 
 SEED_ADDRESS = "9500 Gilman Dr, La Jolla, CA"
+# Real version fingerprints (CIDs) start with "bafyrei"; fake ones reuse it.
 SEED_CID_PREFIX = "bafyreiseed"
 
-# (rkey, did, handle, name, description, place, start offset in hours,
-#  duration in hours, tags, group)
+# (record key, author DID, author handle, name, description, place, start
+#  offset in hours, duration in hours, tags, group)
 SeedRow = tuple[
     str, str, str, str, str, str, float, float, list[str], str | None
 ]
@@ -219,19 +225,32 @@ def _seed_event(row: SeedRow, now: datetime) -> IndexedEvent:
 
 
 def seed_events(now: datetime) -> list[IndexedEvent]:
-    """Return every sample event, timed relative to now."""
+    """
+    Build every sample event, timed relative to now.
+
+    :param now: the moment the start offsets are measured from.
+    :returns: the sample events.
+    """
     return [_seed_event(row, now) for row in SEED]
 
 
 def seed(store: EventStore, now: datetime) -> int:
-    """Upsert the sample events; returns how many were written."""
+    """
+    Upsert the sample events.
+
+    :param store: the event index to fill.
+    :param now: the moment the start offsets are measured from.
+    :returns: how many events were created or changed.
+    """
     return sum(
         store.upsert_event(event) != "unchanged" for event in seed_events(now)
     )
 
 
 def main() -> None:
-    """Seed the database named by DATABASE_PATH (see backend/.env)."""
+    """
+    Seed the database named by DATABASE_PATH (see backend/.env).
+    """
     from store.sqlite import SqliteStore
 
     settings = load_settings_from_environment()

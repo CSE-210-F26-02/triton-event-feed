@@ -74,7 +74,9 @@ export class ConfigError extends Error {
 /**
  * @typedef {object} AppConfig
  * @property {string} apiBaseUrl AppView origin/prefix; "" means same origin
- * @property {{plcBase: string, resolverBases: string[]}} atproto
+ * @property {{plcBase: string, resolverBases: string[]}} atproto AT Protocol lookup
+ *   services: the PLC directory (lists did:plc account ids) and the handle resolvers
+ *   (turn a username into an account id)
  * @property {MapConfig} map
  */
 

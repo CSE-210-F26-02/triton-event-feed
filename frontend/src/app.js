@@ -207,7 +207,8 @@ export async function start({ config, mockConfig } = {}) {
     toast,
     onNotification: (notification) => applyNotification(notification),
   });
-  // #19: subscriptions are records on the logged-in user's PDS (demo mode has no PDS).
+  // #19: subscriptions are records in the logged-in user's own account, on their PDS
+  // (demo mode has no account, so no subscriptions).
   const subscriptions = createSubscriptions({
     getRepo: () => (atproto.loggedIn ? atproto : null),
     onChange: (subscribed) => {

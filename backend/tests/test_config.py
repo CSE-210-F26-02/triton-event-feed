@@ -45,6 +45,9 @@ def clean_environment(monkeypatch):
     """
     Unset every DEV_ENV variable for one test, and undo afterwards
     whatever the test (or load_dotenv) writes to os.environ.
+
+    :param monkeypatch: pytest's monkeypatch fixture.
+    :returns: the same monkeypatch, for tests that set more variables.
     """
     for variable_name in DEV_ENV:
         # setenv first so monkeypatch remembers to remove the key again.
@@ -54,7 +57,12 @@ def clean_environment(monkeypatch):
 
 
 def env_with(**overrides):
-    """DEV_ENV with some variables replaced (None removes a variable)."""
+    """
+    DEV_ENV with some variables replaced (None removes a variable).
+
+    :param overrides: new values by variable name.
+    :returns: the resulting environment.
+    """
     merged = {**DEV_ENV, **overrides}
     return {
         variable_name: value
@@ -64,14 +72,21 @@ def env_with(**overrides):
 
 
 def problems_for(environ):
-    """The ConfigError problems load_settings reports for environ."""
+    """
+    The ConfigError problems load_settings reports for an environment.
+
+    :param environ: the environment to load.
+    :returns: the problem messages.
+    """
     with pytest.raises(ConfigError) as caught:
         load_settings(environ)
     return caught.value.problems
 
 
 def test_example_file_is_a_valid_configuration():
-    """.env.example must always work as-is, so copying it is enough."""
+    """
+    .env.example must always work as-is, so copying it is enough.
+    """
     values = dotenv_values(EXAMPLE_PATH)
     settings = load_settings(values)
     assert settings.is_prod is False

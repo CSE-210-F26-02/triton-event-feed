@@ -1,4 +1,6 @@
-"""Event storage: the EventStore interface and its SQLite implementation."""
+"""
+Event storage: the EventStore interface and its SQLite implementation.
+"""
 
 from store.base import EventStore, UpsertResult
 

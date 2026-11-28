@@ -2,7 +2,8 @@
  * "My subscriptions" page (#19): the signed-in user's subscribed upcoming events, shown in
  * the same pane as the event detail (it replaces the map while open).
  *
- * The subscribed URIs come from the user's PDS (subscriptions.js). Each event is taken
+ * The subscribed URIs come from the subscription records in the user's own account
+ * (subscriptions.js). Each event is taken
  * from the feed when it is already loaded, otherwise fetched with GET /api/event.
  * STUB(#5): the backend does not serve /api/event yet, so against the real backend only
  * events present in the feed resolve; the rest are listed as unavailable (still with an

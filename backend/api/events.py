@@ -1,4 +1,6 @@
-"""GET /api/events, /api/event, /api/tags and /api/groups (cached JSON)."""
+"""
+GET /api/events, /api/event, /api/tags and /api/groups (cached JSON).
+"""
 
 import hashlib
 import json
@@ -49,12 +51,25 @@ MAX_PAGE_SIZE = 100
 
 
 def _visible_cutoff(now: datetime, settings: Settings) -> datetime:
-    """Events that ended before this moment are hidden from listings."""
+    """
+    The moment before which ended events are hidden from listings.
+
+    :param now: the current time.
+    :param settings: supplies expiry_grace_seconds, how long an event stays
+        visible after it ends.
+    :returns: now minus the grace period.
+    """
     return now - timedelta(seconds=settings.expiry_grace_seconds)
 
 
 def _merge_tags(tag: list[str], tags: list[str]) -> list[str]:
-    """Combine repeated ?tag= values with comma-separated ?tags= values."""
+    """
+    Combine repeated ?tag= values with comma-separated ?tags= values.
+
+    :param tag: every ?tag= value, e.g. ["food", "free"].
+    :param tags: every ?tags= value, e.g. ["music,art"].
+    :returns: all the tags in one list.
+    """
     merged = list(tag)
     for tags_value in tags:
         merged.extend(
@@ -66,7 +81,12 @@ def _merge_tags(tag: list[str], tags: list[str]) -> list[str]:
 
 
 def _etag_for(payload: Any) -> str:
-    """Weak ETag: a hash of the payload's canonical JSON."""
+    """
+    Compute a weak ETag: a hash of the payload's canonical JSON.
+
+    :param payload: the JSON-serialisable response body.
+    :returns: the ETag header value, e.g. 'W/"3f2a..."'.
+    """
     canonical_json = json.dumps(
         payload, sort_keys=True, separators=(",", ":")
     ).encode()
@@ -75,7 +95,13 @@ def _etag_for(payload: Any) -> str:
 
 
 def _matches_etag(if_none_match: str | None, etag: str) -> bool:
-    """True when the If-None-Match header names etag (or "*")."""
+    """
+    Check whether the client already has this version of the response.
+
+    :param if_none_match: the request's If-None-Match header, or None.
+    :param etag: the current ETag.
+    :returns: True when the header names etag (or "*").
+    """
     if not if_none_match:
         return False
     target = etag.removeprefix(ETAG_WEAK_PREFIX)
@@ -89,7 +115,14 @@ def _matches_etag(if_none_match: str | None, etag: str) -> bool:
 
 
 def _cached_json(request: Request, payload: Any) -> Response:
-    """Send payload with an ETag, or 304 if the client already has it."""
+    """
+    Send payload with an ETag, or 304 if the client already has it.
+
+    :param request: the incoming HTTP request (for its If-None-Match
+        header).
+    :param payload: the JSON-serialisable response body.
+    :returns: a 200 JSON response, or an empty 304 response.
+    """
     etag = _etag_for(payload)
     headers = {"ETag": etag, "Cache-Control": CACHE_CONTROL}
     if _matches_etag(request.headers.get("if-none-match"), etag):
@@ -99,8 +132,10 @@ def _cached_json(request: Request, payload: Any) -> Response:
 
 def _parse_bbox(bbox: str | None) -> BoundingBox | None:
     """
-    Parse the ?bbox= parameter.
+    Parse the ?bbox= (map area) parameter.
 
+    :param bbox: "west,south,east,north" in degrees, or None.
+    :returns: the bounding box, or None when the parameter is absent.
     :raises HTTPException: 422 when bbox is malformed.
     """
     if bbox is None:
@@ -138,6 +173,23 @@ def list_events(
     """
     List current events matching the filters, one page at a time.
 
+    :param request: the incoming HTTP request (for its If-None-Match
+        header).
+    :param store: the event index.
+    :param settings: the validated backend settings.
+    :param tag: ?tag=, repeatable; an event matching any tag is listed.
+    :param tags: ?tags=, comma-separated tags (same meaning as tag).
+    :param group: ?group=, only events of this group.
+    :param search_text: ?q=, text to find in the name, description or place.
+    :param before: ?before=, only events that start before this time.
+    :param after: ?after=, only events that end after this time (default:
+        now, minus the grace period).
+    :param bbox: ?bbox=, only events inside this map area.
+    :param sort: ?sort=, "soonest" (by start time) or "newest" (by index
+        time).
+    :param limit: ?limit=, the page size.
+    :param cursor: ?cursor=, the cursor of the previous page.
+    :returns: {"events": [...], "cursor": ...} with an ETag.
     :raises HTTPException: 422 for a bad bbox, 400 for a bad cursor.
     """
     now = datetime.now(UTC)
@@ -170,6 +222,11 @@ def get_event(uri: str, request: Request, store: Store) -> Response:
     """
     Return one event with its announcements.
 
+    :param uri: ?uri=, the event's id (its AT URI).
+    :param request: the incoming HTTP request (for its If-None-Match
+        header).
+    :param store: the event index.
+    :returns: the event's JSON view, with an ETag.
     :raises HTTPException: 404 when no event has this URI.
     """
     event = store.get_event(uri)
@@ -188,7 +245,15 @@ def get_event(uri: str, request: Request, store: Store) -> Response:
 def list_tags(
     request: Request, store: Store, settings: SettingsDep
 ) -> Response:
-    """Return every tag on a visible event, with how many events use it."""
+    """
+    Return every tag on a visible event, with how many events use it.
+
+    :param request: the incoming HTTP request (for its If-None-Match
+        header).
+    :param store: the event index.
+    :param settings: the validated backend settings.
+    :returns: [{"value": tag, "count": n}, ...], with an ETag.
+    """
     cutoff = _visible_cutoff(datetime.now(UTC), settings)
     counts = store.list_tags(cutoff)
     return _cached_json(request, [count.model_dump() for count in counts])
@@ -198,7 +263,15 @@ def list_tags(
 def list_groups(
     request: Request, store: Store, settings: SettingsDep
 ) -> Response:
-    """Return every group hosting a visible event, with event counts."""
+    """
+    Return every group hosting a visible event, with event counts.
+
+    :param request: the incoming HTTP request (for its If-None-Match
+        header).
+    :param store: the event index.
+    :param settings: the validated backend settings.
+    :returns: [{"value": group, "count": n}, ...], with an ETag.
+    """
     cutoff = _visible_cutoff(datetime.now(UTC), settings)
     counts = store.list_groups(cutoff)
     return _cached_json(request, [count.model_dump() for count in counts])

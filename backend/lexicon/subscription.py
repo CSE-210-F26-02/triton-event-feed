@@ -1,11 +1,18 @@
 """
 Validator for app.communitymap.subscription records.
 
-The schema lives in lexicons/app/communitymap/subscription.json at the repo
-root. A subscription is stored on the subscriber's own PDS and points at the
-event it follows with a com.atproto.repo.strongRef ({"uri", "cid"}). The
-indexer (#5) will run this validator on every subscription record it ingests,
-so the backend knows who to notify when an event changes.
+A subscription record means "notify me when this event changes". Like
+every AT Protocol record it is saved in its creator's own account (on their
+"PDS", the server that stores their account), not in our database, and it is
+public. Its schema ("lexicon") lives in
+lexicons/app/communitymap/subscription.json at the repo root.
+
+The record points at the event it follows with a "strongRef",
+{"uri": "at://...", "cid": "..."}: the event record's address on the
+network (AT URI) and a fingerprint (CID) of the version that was followed.
+The indexer (#5) will run this validator on every subscription record it
+ingests, so the backend knows who to notify when an event changes. (Terms:
+docs/projects/triton-event-feed/AT_PROTOCOL_GLOSSARY.md)
 
 The frontend has its own validator
 (frontend/src/lexicon/validateSubscription.js). Both are tested against the
@@ -41,16 +48,20 @@ with LEXICON_PATH.open(encoding="utf-8") as _lexicon_file:
 _RECORD = LEXICON["defs"]["main"]["record"]
 SUBSCRIPTION_REQUIRED: list[str] = _RECORD["required"]
 
-# at://<authority>/<collection>/<record key>, the shape of a record URI.
+# The shape of a record's address (AT URI):
+# at://<account DID>/<record type NSID>/<record key>.
 _RECORD_URI_RE = re.compile(r"^at://([^/]+)/([^/]+)/([^/?#]+)$")
 
 
 def _check_subject_uri(subject_uri: Any) -> list[str]:
     """
-    Check that subject.uri is an at:// URI of an event record.
+    Check that subject.uri is the address (AT URI) of an event record.
 
     A rule the lexicon language can't express: the strongRef must point at an
     app.communitymap.event, not at any other kind of record.
+
+    :param subject_uri: the subject's "uri" value (untrusted).
+    :returns: one message per problem (empty when it is fine).
     """
     if not isinstance(subject_uri, str) or not subject_uri.startswith("at://"):
         return ['subject.uri must be a string starting with "at://"']
@@ -61,7 +72,13 @@ def _check_subject_uri(subject_uri: Any) -> list[str]:
 
 
 def _check_subject(subject: Any) -> list[str]:
-    """Check the subject strongRef: {"uri": "at://...", "cid": "..."}."""
+    """
+    Check the subject: the pointer to the followed event.
+
+    :param subject: a strongRef, {"uri": "at://...", "cid": "..."}
+        (untrusted).
+    :returns: one message per problem (empty when it is fine).
+    """
     if not isinstance(subject, dict):
         return ["subject must be an object with uri and cid"]
 
@@ -82,7 +99,8 @@ def validate_subscription(record: Any) -> list[str]:
     """
     Check an app.communitymap.subscription record.
 
-    :param record: the subscription as a dict (e.g. parsed JSON from a PDS).
+    :param record: the subscription as a dict (e.g. parsed JSON read from
+        the subscriber's account server, their PDS).
     :returns: A list of error messages. An empty list means the record is
         valid. Each message starts with the field it is about, for example
         "subject.cid is required".

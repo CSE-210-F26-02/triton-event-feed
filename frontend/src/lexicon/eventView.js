@@ -2,8 +2,13 @@
  * Bridge between the AppView's EventView (what GET /api/event and GET /api/events return)
  * and the app.communitymap.event lexicon (lexicons/app/communitymap/event.json).
  *
- * An EventView is the lexicon record's fields flattened next to AppView metadata
- * (uri, cid, authorDid, authorHandle, indexedAt, updatedAt, status, updates, ...).
+ * "AppView" is the AT Protocol name for our backend: it collects the event records hosts
+ * save in their own accounts and serves them back as an index. The "lexicon" is the
+ * schema of an event record. Terms: docs/projects/triton-event-feed/AT_PROTOCOL_GLOSSARY.md
+ *
+ * An EventView is the record's fields flattened next to what the AppView knows about it
+ * (uri: its address, cid: its version fingerprint, authorDid: the host's account id,
+ * authorHandle: their username, indexedAt, updatedAt, status, updates, ...).
  * This module:
  *   1. pulls the lexicon record back out of an EventView and validates it with the
  *      shared validator (validateEvent.js), so views can flag records that break the

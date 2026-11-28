@@ -25,8 +25,10 @@ EVENT_CID = "bafyreihooyosut5ztb3xty23uwoyij5ovnqr5qldanntxmah33quatfwoy"
 
 def load_fixtures(folder):
     """
-    Return a pytest.param per .json file in
-    fixtures/subscription/<folder>/.
+    Return a pytest.param per .json file in fixtures/subscription/<folder>/.
+
+    :param folder: "valid" or "invalid".
+    :returns: one param per fixture, named after its file.
     """
     files = sorted((FIXTURES_DIR / folder).glob("*.json"))
     return [
@@ -39,7 +41,12 @@ def load_fixtures(folder):
 
 
 def make_record(**overrides):
-    """Build a valid subscription record, with fields replaced by overrides."""
+    """
+    Build a valid subscription record, with fields replaced by overrides.
+
+    :param overrides: field values to replace.
+    :returns: the record.
+    """
     record = {
         "$type": SUBSCRIPTION_NSID,
         "subject": {"uri": EVENT_URI, "cid": EVENT_CID},
@@ -54,7 +61,9 @@ INVALID = load_fixtures("invalid")
 
 
 def test_fixtures_were_found():
-    """Guard against a wrong path silently running zero fixture tests."""
+    """
+    Guard against a wrong path silently running zero fixture tests.
+    """
     assert VALID and INVALID
 
 

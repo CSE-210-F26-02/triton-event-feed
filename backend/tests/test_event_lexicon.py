@@ -18,7 +18,12 @@ FIXTURES_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "event"
 
 
 def load_fixtures(folder):
-    """Return a pytest.param per .json file in fixtures/event/<folder>/."""
+    """
+    Return a pytest.param per .json file in fixtures/event/<folder>/.
+
+    :param folder: "valid" or "invalid".
+    :returns: one param per fixture, named after its file.
+    """
     files = sorted((FIXTURES_DIR / folder).glob("*.json"))
     return [
         pytest.param(
@@ -34,7 +39,9 @@ INVALID = load_fixtures("invalid")
 
 
 def test_fixtures_were_found():
-    """Guard against a wrong path silently running zero fixture tests."""
+    """
+    Guard against a wrong path silently running zero fixture tests.
+    """
     assert VALID and INVALID
 
 
@@ -62,7 +69,9 @@ def test_graphemes_count_emoji_as_one():
 
 
 def test_group_error_messages_name_the_strongref_fields():
-    """The group messages tell the user which strongRef fields are wrong."""
+    """
+    The group messages tell the user which strongRef fields are wrong.
+    """
     record = json.loads(
         (FIXTURES_DIR / "valid" / "full.json").read_text(encoding="utf-8")
     )["record"]

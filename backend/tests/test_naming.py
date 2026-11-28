@@ -53,7 +53,11 @@ NAME_PARTS = re.compile(r"_+|(?<=[a-z0-9])(?=[A-Z])")
 
 
 def backend_python_files():
-    """Every .py file in backend/, except third-party folders."""
+    """
+    Every .py file in backend/, except third-party folders.
+
+    :returns: the files' paths, sorted.
+    """
     return sorted(
         path
         for path in BACKEND_DIR.rglob("*.py")
@@ -62,7 +66,12 @@ def backend_python_files():
 
 
 def declared_names(tree):
-    """Yield (name, line) for every name the code declares."""
+    """
+    Yield (name, line) for every name the code declares.
+
+    :param tree: a parsed module.
+    :yields: each declared name and the line it is on.
+    """
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
             yield node.id, node.lineno
@@ -81,7 +90,12 @@ def declared_names(tree):
 
 
 def is_dunder(name):
-    """True for Python's own special names such as __init__ and __all__."""
+    """
+    Check for Python's own special names such as __init__ and __all__.
+
+    :param name: an identifier.
+    :returns: True for a double-underscore name.
+    """
     return name.startswith("__") and name.endswith("__")
 
 
@@ -104,7 +118,12 @@ def naming_problem(name):
 
 
 def unclear_names_in(path):
-    """Return "file:line name (reason)" for each unclear name in one file."""
+    """
+    Find every unclear name in one file.
+
+    :param path: the .py file to check.
+    :returns: "file:line name (reason)" for each unclear name.
+    """
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     relative_path = path.relative_to(BACKEND_DIR)
     return [
@@ -115,7 +134,9 @@ def unclear_names_in(path):
 
 
 def test_found_backend_files():
-    """Guard against a wrong path silently checking nothing."""
+    """
+    Guard against a wrong path silently checking nothing.
+    """
     assert BACKEND_DIR.joinpath("main.py") in backend_python_files()
 
 
@@ -127,7 +148,9 @@ def test_every_name_is_descriptive():
 
 
 def test_detects_one_letter_names(tmp_path):
-    """The check itself must catch a short name."""
+    """
+    The check itself must catch a short name.
+    """
     sample = tmp_path / "sample.py"
     sample.write_text("def total(x):\n    return x\n", encoding="utf-8")
     tree = ast.parse(sample.read_text(encoding="utf-8"))

@@ -1,8 +1,17 @@
 """
-Guard: every backend docstring uses the reST (Sphinx) field style.
+Guard: every backend docstring has one layout and uses reST (Sphinx) fields.
 
 One style everywhere makes docstrings quicker to read and lets tools parse
-them. Parameters, return values and errors are written as fields::
+them. Every docstring, even a one-sentence one, puts its opening and closing
+quotes on lines of their own::
+
+    \"\"\"
+    Return the store.
+    \"\"\"
+
+(ruff's D213/D209 only enforce this for multi-line docstrings, so this test
+covers the one-line ones too.) Parameters, return values and errors are
+written as fields::
 
     :param environ: where to read variables from.
     :returns: the validated Settings.
@@ -37,6 +46,11 @@ NON_STANDARD_FIELD = re.compile(r"^\s*:(" + "|".join(PREFERRED_FIELD) + r")\b")
 # A ":param name:" field; group 1 is the documented parameter name.
 PARAM_FIELD = re.compile(r"^\s*:param (\w+):", re.MULTILINE)
 
+# What may stand alone on a docstring's opening line: the quotes, optionally
+# with the raw-string prefix.
+OPENING_QUOTES = ('"""', 'r"""', 'R"""')
+CLOSING_QUOTES = '"""'
+
 # Nodes that can carry a docstring.
 DOCUMENTED_NODES = (
     ast.Module,
@@ -53,12 +67,60 @@ def docstrings_in(tree):
     :param tree: a parsed module.
     :yields: the first line of each docstring and its text.
     """
+    for docstring_node in docstring_nodes(tree):
+        yield docstring_node.lineno, docstring_node.value
+
+
+def docstring_nodes(tree):
+    """
+    Yield the string node of every docstring.
+
+    :param tree: a parsed module.
+    :yields: each docstring's ast.Constant, which carries its text and its
+        first and last line.
+    """
     for node in ast.walk(tree):
-        if not isinstance(node, DOCUMENTED_NODES):
+        if not isinstance(node, DOCUMENTED_NODES) or not node.body:
             continue
-        docstring = ast.get_docstring(node, clean=False)
-        if docstring is not None:
-            yield node.body[0].lineno, docstring
+        first_statement = node.body[0]
+        if (
+            isinstance(first_statement, ast.Expr)
+            and isinstance(first_statement.value, ast.Constant)
+            and isinstance(first_statement.value.value, str)
+        ):
+            yield first_statement.value
+
+
+def layout_problem(source_lines, docstring_node):
+    """
+    Explain why a docstring's quotes are not on lines of their own.
+
+    :param source_lines: the module's source, split into lines.
+    :param docstring_node: the docstring's ast.Constant node.
+    :returns: a short reason, or None when the layout is right.
+    """
+    opening_line = source_lines[docstring_node.lineno - 1].strip()
+    closing_line = source_lines[docstring_node.end_lineno - 1].strip()
+    if opening_line not in OPENING_QUOTES:
+        return 'text starts on the opening """ line'
+    if closing_line != CLOSING_QUOTES:
+        return 'closing """ is not on its own line'
+    return None
+
+
+def layout_problems_in(source):
+    """
+    Find every docstring in one module whose quotes share a line with text.
+
+    :param source: the module's source code.
+    :returns: (line number, reason) for each badly laid-out docstring.
+    """
+    source_lines = source.splitlines()
+    return [
+        (docstring_node.lineno, problem)
+        for docstring_node in docstring_nodes(ast.parse(source))
+        if (problem := layout_problem(source_lines, docstring_node))
+    ]
 
 
 def style_problems(docstring):
@@ -162,6 +224,52 @@ def test_every_docstring_uses_rest_fields():
     assert offenders == [], "Use reST docstring fields:\n" + "\n".join(
         offenders
     )
+
+
+def test_every_docstring_puts_its_quotes_on_their_own_lines():
+    offenders = []
+    for path in backend_python_files():
+        relative_path = path.relative_to(BACKEND_DIR)
+        offenders += [
+            f"{relative_path}:{line} {problem}"
+            for line, problem in layout_problems_in(
+                path.read_text(encoding="utf-8")
+            )
+        ]
+    failure_message = (
+        'Put """ on its own line, above and below the text:\n'
+        + "\n".join(offenders)
+    )
+    assert offenders == [], failure_message
+
+
+def test_detects_one_line_docstrings():
+    source = 'def total():\n    """Return the total."""\n'
+    assert layout_problems_in(source) == [
+        (2, 'text starts on the opening """ line')
+    ]
+
+
+def test_detects_text_on_the_opening_line():
+    source = 'def total():\n    """Return the total.\n    """\n'
+    assert layout_problems_in(source) == [
+        (2, 'text starts on the opening """ line')
+    ]
+
+
+def test_detects_text_on_the_closing_line():
+    source = 'def total():\n    """\n    Return the total."""\n'
+    assert layout_problems_in(source) == [
+        (2, 'closing """ is not on its own line')
+    ]
+
+
+def test_accepts_quotes_on_their_own_lines():
+    source = (
+        '"""\nModule summary.\n"""\n\n'
+        'def total():\n    """\n    Return the total.\n    """\n'
+    )
+    assert layout_problems_in(source) == []
 
 
 def test_detects_google_sections():

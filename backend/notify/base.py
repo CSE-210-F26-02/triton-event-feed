@@ -5,14 +5,18 @@ clients.
 
 from __future__ import annotations
 
+from abc import abstractmethod
 from typing import Protocol
 
 from models import NotificationKind
 
 
 class Notifier(Protocol):
-    """Anything that can tell an event's subscribers about a change."""
+    """
+    Anything that can tell an event's subscribers about a change.
+    """
 
+    @abstractmethod
     async def publish(
         self, event_uri: str, kind: NotificationKind, message: str
     ) -> int:
@@ -24,4 +28,4 @@ class Notifier(Protocol):
         :param message: human-readable text shown to subscribers.
         :returns: How many subscribers were notified.
         """
-        ...
+        pass

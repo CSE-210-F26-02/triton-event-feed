@@ -18,7 +18,9 @@ QUEUE_MAXSIZE = 100
 
 
 class SubscriptionNotifier:
-    """Stores notifications and pushes them to connected SSE clients."""
+    """
+    Stores notifications and pushes them to connected SSE clients.
+    """
 
     def __init__(self, store: EventStore) -> None:
         """
@@ -33,9 +35,12 @@ class SubscriptionNotifier:
         self, event_uri: str, kind: NotificationKind, message: str
     ) -> int:
         """
-        Persist and push one notification per subscriber of event_uri.
+        Save and push one notification per subscriber of an event.
 
-        :returns: How many subscribers were notified.
+        :param event_uri: the event's id (its AT URI).
+        :param kind: what happened, e.g. "updated" or "deleted".
+        :param message: the readable text shown to the subscriber.
+        :returns: how many subscribers were notified.
         """
         now = datetime.now(UTC)
         subscribers = self._store.subscribers_of(event_uri)
@@ -58,6 +63,9 @@ class SubscriptionNotifier:
 
         A full queue (a slow client) drops the live copy; the stored
         notification is still delivered when the client catches up.
+
+        :param subscriber_id: the subscriber's opaque id.
+        :param notification: the saved notification.
         """
         for queue in self._queues.get(subscriber_id, ()):
             try:
@@ -69,7 +77,12 @@ class SubscriptionNotifier:
                 )
 
     def connect(self, subscriber_id: str) -> asyncio.Queue[Notification]:
-        """Register a live connection and return its queue."""
+        """
+        Register a live connection.
+
+        :param subscriber_id: the subscriber's opaque id.
+        :returns: the queue that the connection's notifications arrive on.
+        """
         queue: asyncio.Queue[Notification] = asyncio.Queue(
             maxsize=QUEUE_MAXSIZE
         )
@@ -79,7 +92,12 @@ class SubscriptionNotifier:
     def disconnect(
         self, subscriber_id: str, queue: asyncio.Queue[Notification]
     ) -> None:
-        """Forget a live connection (safe to call more than once)."""
+        """
+        Forget a live connection (safe to call more than once).
+
+        :param subscriber_id: the subscriber's opaque id.
+        :param queue: the queue that connect returned.
+        """
         queues = self._queues.get(subscriber_id)
         if queues is None:
             return

@@ -1,3 +1,7 @@
+"""
+Tests for POST /api/import/ical and POST /api/dev/records.
+"""
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -27,6 +31,13 @@ END:VCALENDAR
 
 
 def feed_handler(request: httpx.Request) -> httpx.Response:
+    """
+    Answer the fake feed requests made by the import route.
+
+    :param request: the outgoing request.
+    :returns: an iCal feed, or an HTML page for /html.
+    :raises httpx.ConnectError: for the host down.example.
+    """
     if request.url.host == "down.example":
         raise httpx.ConnectError("down")
     if request.url.path == "/html":
@@ -35,6 +46,12 @@ def feed_handler(request: httpx.Request) -> httpx.Response:
 
 
 def make_app(dev_mode: bool = True) -> tuple[TestClient, FakeStore]:
+    """
+    Build an app with the import and dev routes, wired to fakes.
+
+    :param dev_mode: whether POST /api/dev/records is enabled.
+    :returns: (a test client, the fake store behind it).
+    """
     app = FastAPI()
     app.include_router(imports.router)
     app.include_router(dev.router)
@@ -46,6 +63,11 @@ def make_app(dev_mode: bool = True) -> tuple[TestClient, FakeStore]:
     app.state.processor = CommitProcessor(store, notifier)
 
     async def mock_http() -> AsyncIterator[httpx.AsyncClient]:
+        """
+        Replace the real HTTP client with one answered by feed_handler.
+
+        :yields: the mocked client.
+        """
         async with httpx.AsyncClient(
             transport=httpx.MockTransport(feed_handler)
         ) as http_client:

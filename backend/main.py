@@ -40,6 +40,8 @@ from store.sqlite import SqliteStore
 
 logger = logging.getLogger(__name__)
 
+# "AppView" is the AT Protocol name for a server that collects records
+# from users' accounts and serves an app's view of them: our events index.
 APP_TITLE = "Triton Event Feed AppView"
 APP_VERSION = "0.1.0"
 
@@ -85,7 +87,8 @@ def _start_background_tasks(
     :param settings: the validated settings.
     :param store: the event store the loops read and write.
     :param notifier: tells subscribers about expired or changed events.
-    :param processor: turns Jetstream commits into index changes.
+    :param processor: turns record changes from the network (Jetstream
+        commits) into index changes.
     :returns: The started tasks, so the caller can cancel them on shutdown.
     """
     tasks = [
@@ -124,7 +127,12 @@ def _build_lifespan(settings: Settings, background: bool) -> Lifespan:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        """Create the services on startup and release them on shutdown."""
+        """
+        Create the services on startup and release them on shutdown.
+
+        :param app: the FastAPI app; the services are placed on app.state.
+        :yields: once startup is done; shutdown runs when the app stops.
+        """
         store = SqliteStore(settings.database_path)
         notifier = SubscriptionNotifier(store)
         resolver = HandleResolver()
@@ -240,7 +248,9 @@ def create_app(
 
 
 def run_server() -> None:
-    """Read settings from the environment and serve the app with uvicorn."""
+    """
+    Read settings from the environment and serve the app with uvicorn.
+    """
     settings = load_settings_from_environment()
     configure_logging(settings)
     uvicorn.run(

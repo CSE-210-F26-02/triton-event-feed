@@ -19,7 +19,12 @@ UPDATE_VIEW_FIELDS = {"text", "source_uri", "created_at"}
 
 
 def _as_utc(moment: datetime) -> datetime:
-    """Treat a naive datetime as UTC; leave aware ones unchanged."""
+    """
+    Treat a naive datetime as UTC; leave aware ones unchanged.
+
+    :param moment: the time to normalise.
+    :returns: an aware datetime.
+    """
     if moment.tzinfo is None:
         return moment.replace(tzinfo=UTC)
     return moment
@@ -58,7 +63,12 @@ def event_view(event: IndexedEvent, now: datetime) -> dict[str, Any]:
 
 
 def update_view(update: EventUpdate) -> dict[str, Any]:
-    """Serialise an announcement (text, source and time only)."""
+    """
+    Serialise an announcement (text, source and time only).
+
+    :param update: the announcement.
+    :returns: its JSON-ready dictionary, with camelCase keys.
+    """
     return update.model_dump(
         mode="json", by_alias=True, include=UPDATE_VIEW_FIELDS
     )

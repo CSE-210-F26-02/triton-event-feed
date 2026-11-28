@@ -182,7 +182,8 @@ export function formatEventWhen(startsAt, endsAt, { locale, timeZone } = {}) {
 }
 
 /**
- * Bluesky profile URL for a handle (preferred) or DID, or null when neither is usable.
+ * Bluesky profile URL for a username (handle, preferred) or permanent account id (DID),
+ * or null when neither is usable.
  * @param {string} [handle] e.g. "alice.bsky.social"
  * @param {string} [authorDid] e.g. "did:plc:abc"
  * @returns {string|null}

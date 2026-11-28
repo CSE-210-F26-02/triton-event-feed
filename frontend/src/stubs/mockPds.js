@@ -1,7 +1,15 @@
 /**
- * STUB / DEV ONLY: an in-browser fake of a Bluesky PDS (plus handle and DID resolution),
- * so login and subscriptions (#19) can be previewed, and e2e-tested, without a real
- * account. Enabled only with `?mock` in the page URL, alongside stubs/mockApi.js.
+ * STUB / DEV ONLY: an in-browser fake of a Bluesky account server, so login and
+ * subscriptions (#19) can be previewed, and e2e-tested, without a real account. Enabled
+ * only with `?mock` in the page URL, alongside stubs/mockApi.js.
+ *
+ * What it fakes (AT Protocol terms: docs/projects/triton-event-feed/AT_PROTOCOL_GLOSSARY.md):
+ *   - a PDS (Personal Data Server): the server that stores a user's account ("repo")
+ *     and its JSON records, such as their subscriptions;
+ *   - handle and DID resolution: turning a username (handle, e.g. you.demo.test) into a
+ *     permanent account id (DID) and finding which server stores that account.
+ * It answers the same XRPC requests (HTTP calls to /xrpc/<method name>) a real one does,
+ * so src/atproto.js runs unchanged against it.
  *
  * - Any handle logs in with any non-empty password ("app password").
  * - The fake tokens it issues come from frontend/.env (VITE_MOCK_PDS_*_TOKEN_PREFIX,
@@ -15,9 +23,12 @@ import { getStorage, storageGet, storageSet } from "../util.js";
 
 /** Origin of the fake PDS (never contacted: every request is answered in-page). */
 export const MOCK_PDS_ORIGIN = "https://pds.mock.test";
-/** localStorage key holding every mock repo. */
+/** localStorage key holding every mock account's records (its "repo"). */
 export const MOCK_PDS_STORAGE_KEY = "cm:mock-pds";
-/** A well-formed CID returned for every mock record (never resolved). */
+/**
+ * A well-formed CID (version fingerprint of a record) returned for every mock record.
+ * Real PDSes compute it from the record's content; the app never checks it.
+ */
 const MOCK_RECORD_CID =
   "bafyreihooyosut5ztb3xty23uwoyij5ovnqr5qldanntxmah33quatfwoy";
 /** Page size when listRecords is called without `limit`. */
@@ -84,12 +95,13 @@ const respond = (body, status = 200) =>
     headers: { "content-type": "application/json" },
   });
 
-/** XRPC-style error Response. */
+/** Error Response shaped like a real PDS's: {error: name, message: explanation}. */
 const xrpcError = (status, error, message) =>
   respond({ error, message }, status);
 
 /**
- * Read / write the persisted repos: {[repoDid]: {[collection]: {[recordKey]: {cid, value}}}}.
+ * Read / write every mock account's records, saved in localStorage as
+ * {[account DID]: {[record type NSID]: {[record key]: {cid, value}}}}.
  * @param {Storage|null} storage
  */
 function createRepoStore(storage) {
@@ -163,7 +175,8 @@ function sessionHandlers(tokens) {
 }
 
 /**
- * Repo handlers: createRecord / putRecord / deleteRecord / listRecords.
+ * Record handlers (save new, replace, delete, list): createRecord / putRecord /
+ * deleteRecord / listRecords.
  * @param {ReturnType<typeof createRepoStore>} store
  * @param {ReturnType<typeof createTokenIssuer>} tokens
  * @returns {Record<string, (url: URL, init?: RequestInit) => Response>}
@@ -226,7 +239,9 @@ function listRecords(store, url) {
 }
 
 /**
- * Answer handle / DID resolution, which happens on hosts other than the PDS.
+ * Answer the lookups made before login: username (handle) → account id (DID), and
+ * DID → DID document (which names the account's PDS). Real ones are served by other
+ * hosts than the PDS (a handle resolver and the PLC directory).
  * @param {URL} url
  * @returns {Response|null}
  */

@@ -13,6 +13,14 @@ import { Client, XrpcAuthenticationError } from "@atproto/lex-client";
 // TODO: Warn users about privacy policy, or deploy our own handler
 const HandleResolver = "https://bsky.social";
 
+/**
+ * Logs a user in to their AT Protocol account, by OAuth or by app password.
+ *
+ * On the AT Protocol network each user's data lives in their own account, stored on a
+ * server they choose, their PDS (Personal Data Server, e.g. bsky.social). Logging in
+ * gives this app a client that can save records (events, subscriptions) there for them.
+ * Terms: docs/projects/triton-event-feed/AT_PROTOCOL_GLOSSARY.md
+ */
 class AuthProvider {
   /**
    * A URL pointing to the client metadata document (oauth-client-metadata.json).
@@ -38,7 +46,8 @@ class AuthProvider {
   #session;
 
   /**
-   * A Client object (from @atproto/lex) for interacting with the user's PDS. May be null if session is invalid.
+   * A Client object (from @atproto/lex) for reading and writing records in the user's
+   * account on their PDS. May be null if session is invalid.
    */
   #client;
 
@@ -236,7 +245,7 @@ class AuthProvider {
   }
 
   /**
-   * Use this to manipulate user PDS data.
+   * Use this to read and write records in the user's account (on their PDS).
    */
   get client() {
     return this.#client;

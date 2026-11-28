@@ -1,3 +1,7 @@
+"""
+Tests for the JSON views the API returns (utils/views.py).
+"""
+
 from datetime import timedelta
 
 from utils.views import event_view

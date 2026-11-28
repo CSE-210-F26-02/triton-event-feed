@@ -3,6 +3,7 @@
         "atproto",
         "bsky",
         "communitymap",
+        "Dids",
         "dotenv",
         "fastapi",
         "ical",
@@ -11,7 +12,9 @@
         "Jetstream",
         "NSID",
         "rkey",
+        "seedtritonfood",
         "SOCKADDR",
+        "tritonfood",
         "uvicorn",
         "Vitest"
     ]

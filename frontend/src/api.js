@@ -1,5 +1,7 @@
 /**
  * HTTP client for the Community Map AppView (docs/projects/triton-event-feed/CONTRACTS.md).
+ * "AppView" is the AT Protocol name for our backend: it collects the event records hosts
+ * save in their own accounts and serves them as a searchable index.
  *
  * Every GET resolves to `{data, stale}`. On network failure, timeout or 5xx, a GET falls
  * back to the last cached response with `stale: true` (and `savedAt`). Writes never fall back.
@@ -172,7 +174,11 @@ export function createApi({
       url("/api/notifications/stream", { subscriberId }),
     /** @param {string} icalUrl @returns {Promise<{imported:number}>} */
     importIcal: (icalUrl) => send("POST", "/api/import/ical", { url: icalUrl }),
-    /** @param {object} commit Jetstream-shaped commit @returns {Promise<{ok:true}>} */
+    /**
+     * Demo mode only: hand the backend a record change as if it came from the network.
+     * @param {object} commit a message shaped like a Jetstream commit (see devWriter.js)
+     * @returns {Promise<{ok:true}>}
+     */
     postDevRecord: (commit) => send("POST", "/api/dev/records", commit),
   };
 }

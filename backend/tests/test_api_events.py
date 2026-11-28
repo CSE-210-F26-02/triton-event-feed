@@ -1,3 +1,8 @@
+"""
+Tests for the event listing routes (api/events.py): filters, sorting,
+paging, ETags and tag/group counts.
+"""
+
 from datetime import timedelta
 
 from models import EventUpdate, Location
@@ -43,6 +48,12 @@ def test_list_events_filters(client, store, make_event, now):
     )
 
     def names(**params):
+        """
+        List events with some query parameters.
+
+        :param params: the query parameters, e.g. tag="food".
+        :returns: the record keys of the events returned, in order.
+        """
         events = client.get("/api/events", params=params).json()["events"]
         return [event["uri"].rsplit("/", 1)[1] for event in events]
 
@@ -119,7 +130,13 @@ def test_tags_and_groups(client, store, make_event):
 
 
 def _store_campus_and_downtown_events(store, make_event, now):
-    """Store "a" (on campus, created first) and "b" (downtown, newer)."""
+    """
+    Store "a" (on campus, created first) and "b" (downtown, newer).
+
+    :param store: the test's event index.
+    :param make_event: the event factory fixture.
+    :param now: the test's current time.
+    """
     older = make_event("a", tags=["food"], start_in_hours=1, end_in_hours=4)
     newer_event = make_event(
         "b", tags=["music"], start_in_hours=5, end_in_hours=8
@@ -135,7 +152,12 @@ def _store_campus_and_downtown_events(store, make_event, now):
 
 
 def _rkeys(events):
-    """The record keys (last URI segment) of a list of event views."""
+    """
+    The record keys (last URI segment) of a list of event views.
+
+    :param events: event views from the API.
+    :returns: their record keys, in order.
+    """
     return [event["uri"].rsplit("/", 1)[1] for event in events]
 
 

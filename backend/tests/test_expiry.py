@@ -1,3 +1,8 @@
+"""
+Tests for the expiry sweep (expiry.py): ended events are announced, then
+deleted, and a failing sweep does not stop the loop.
+"""
+
 import asyncio
 from datetime import datetime, timedelta
 
@@ -51,15 +56,25 @@ async def test_sweep_many_pages(store, notifier, make_event, now):
 
 
 class BoomStore(FakeStore):
-    """A store whose every query fails, to prove the loop keeps going."""
+    """
+    A store whose every query fails, to prove the loop keeps going.
+    """
 
     def __init__(self) -> None:
-        """Start counting query attempts."""
+        """
+        Start counting query attempts.
+        """
         super().__init__()
         self.calls = 0
 
     def query_events(self, query: EventQuery, now: datetime) -> Page:
-        """Count the attempt, then fail."""
+        """
+        Count the attempt, then fail.
+
+        :param query: ignored.
+        :param now: ignored.
+        :raises RuntimeError: always.
+        """
         self.calls += 1
         raise RuntimeError("boom")
 

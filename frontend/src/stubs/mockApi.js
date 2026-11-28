@@ -1,5 +1,6 @@
 /**
- * STUB / DEV ONLY: an in-browser fake of the AppView API so the UI can be previewed
+ * STUB / DEV ONLY: an in-browser fake of the AppView API (our backend's /api/*, which
+ * serves the index of events collected from the network) so the UI can be previewed
  * before the backend exists. Enabled only by adding `?mock` to the page URL
  * (e.g. http://localhost:5173/?mock). Never loaded otherwise; delete this file once
  * the real backend serves /api/*.

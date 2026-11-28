@@ -1,8 +1,23 @@
 """
-Turns Jetstream commit messages into index changes and notifications.
+Turns live changes from the AT Protocol network into event-index updates.
+
+Background for newcomers (full glossary:
+docs/projects/triton-event-feed/AT_PROTOCOL_GLOSSARY.md): every user keeps
+their own data, as JSON "records", in their own account (a "repository").
+Each time someone creates, edits or deletes a record, the network announces
+that change, called a "commit". Our Jetstream client (ingest/jetstream.py)
+receives those commits and hands each one to the CommitProcessor here, which
+decides what it means for Triton Event Feed:
+
+  * an event record (app.communitymap.event): add, update or remove the
+    event in our searchable index and tell its subscribers what changed;
+  * a listener record (app.communitymap.listener): remember that a host wants
+    their Bluesky posts with a hashtag shown on their event;
+  * a Bluesky post (app.bsky.feed.post) from such a host: attach it to the
+    event as an announcement.
 
 Network-free: everything external (store, notifier, handle lookup, clock) is
-injected.
+injected, so tests can drive it with plain dictionaries.
 """
 
 from __future__ import annotations
@@ -10,6 +25,7 @@ from __future__ import annotations
 import inspect
 import logging
 import re
+from abc import abstractmethod
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -45,21 +61,50 @@ ListenersChanged = Callable[[list[str]], None | Awaitable[None]]
 
 
 class HandleLookup(Protocol):
-    """Anything that can turn a DID into a handle."""
+    """
+    Anything that can turn an account id (DID) into a username (handle).
 
+    A DID such as "did:plc:ab12cd" is an account's permanent id; a handle such
+    as "tritonfood.bsky.social" is the readable name we show next to an event.
+    """
+
+    @abstractmethod
     async def resolve(self, did: str) -> str | None:
-        """Return the handle for did, or None if it cannot be found."""
-        ...
+        """
+        Look up the current username of one account.
+
+        :param did: the account's permanent id, e.g. "did:plc:ab12cd".
+        :returns: the handle, e.g. "tritonfood.bsky.social", or None if it
+            cannot be found.
+        """
+        pass
 
 
 def utcnow() -> datetime:
-    """Return the current time in UTC (the default injectable clock)."""
+    """
+    Return the current time in UTC (the default injectable clock).
+
+    :returns: an aware datetime in UTC.
+    """
     return datetime.now(UTC)
 
 
 @dataclass(frozen=True)
 class Commit:
-    """One create/update/delete of a record in someone's repository."""
+    """
+    One change to one record in one user's account.
+
+    :ivar did: the permanent id of the account that made the change (the
+        record's author), e.g. "did:plc:ab12cd".
+    :ivar operation: "create", "update" or "delete".
+    :ivar collection: the record type (its NSID), e.g.
+        "app.communitymap.event" for an event.
+    :ivar rkey: the record key: the record's name within its collection,
+        like a file name within a folder.
+    :ivar cid: a fingerprint of this version of the record; it changes every
+        time the record is edited. None for deletes.
+    :ivar record: the record's JSON content, or None for deletes.
+    """
 
     did: str
     operation: str
@@ -70,15 +115,26 @@ class Commit:
 
     @property
     def uri(self) -> str:
-        """The record's at:// URI."""
+        """
+        The record's AT URI: its unique address on the network.
+
+        It has the form at://<author DID>/<record type>/<record key>, and is
+        the id an event has everywhere in our index, API and notifications.
+
+        :returns: the AT URI.
+        """
         return f"at://{self.did}/{self.collection}/{self.rkey}"
 
 
 def parse_commit(message: dict[str, Any]) -> Commit | None:
     """
-    Extract the commit from a Jetstream message.
+    Pull the record change out of one Jetstream message.
 
-    :param message: a decoded Jetstream message.
+    Jetstream also sends messages that are not record changes (for example
+    "an account changed its handle"); those have a "kind" other than "commit"
+    and are ignored here.
+
+    :param message: one decoded Jetstream message (untrusted JSON).
     :returns: The commit, or None if message is not a usable commit.
     """
     body = message.get("commit")
@@ -115,24 +171,47 @@ def _non_empty_text(value: object) -> str | None:
 
 
 def _format_time(moment: datetime) -> str:
-    """Format a time for a change message, e.g. "Thu Nov 12 18:00 UTC"."""
+    """
+    Format a time for a change message.
+
+    :param moment: the time to format.
+    :returns: e.g. "Thu Nov 12 18:00 UTC".
+    """
     return moment.astimezone(UTC).strftime(_TIME_FORMAT)
 
 
 def _format_list(items: list[str]) -> str:
-    """Join items with commas, or "none" for an empty list."""
+    """
+    Join items with commas, for a change message.
+
+    :param items: e.g. ["food", "free"].
+    :returns: e.g. "food, free", or "none" for an empty list.
+    """
     return ", ".join(items) or _NO_VALUE
 
 
 def _changed(label: str, old_record: str, new_record: str) -> str:
-    """Format one "Label changed: old → new" line."""
+    """
+    Format one "Label changed: old → new" line.
+
+    :param label: what changed, e.g. "Time".
+    :param old_record: the old value, already formatted.
+    :param new_record: the new value, already formatted.
+    :returns: the line.
+    """
     return f"{label} changed: {old_record} → {new_record}"
 
 
 def _time_changes(
     old_record: EventRecord, new_record: EventRecord
 ) -> list[str]:
-    """Describe a change of start time (or, failing that, end time)."""
+    """
+    Describe a change of start time (or, failing that, end time).
+
+    :param old_record: the event as it was stored.
+    :param new_record: the event as it is now.
+    :returns: one change line, or [] when the times are the same.
+    """
     if old_record.starts_at != new_record.starts_at:
         return [
             _changed(
@@ -155,7 +234,13 @@ def _time_changes(
 def _location_changes(
     old_record: EventRecord, new_record: EventRecord
 ) -> list[str]:
-    """Describe a change of place name (or, failing that, any details)."""
+    """
+    Describe a change of place name (or, failing that, any details).
+
+    :param old_record: the event as it was stored.
+    :param new_record: the event as it is now.
+    :returns: one change line, or [] when the location is the same.
+    """
     if old_record.location.name != new_record.location.name:
         return [
             _changed(
@@ -169,8 +254,12 @@ def _location_changes(
 
 def diff_events(old_record: EventRecord, new_record: EventRecord) -> list[str]:
     """
-    Human-readable list of what changed between two versions of an
-    event.
+    List, in readable words, what changed between two versions of an event.
+
+    :param old_record: the event as it was stored.
+    :param new_record: the event as it is now.
+    :returns: one line per change, e.g. "Name changed: A → B"; empty when
+        nothing people can see has changed.
     """
     changes: list[str] = []
     if old_record.name != new_record.name:
@@ -229,7 +318,16 @@ async def index_event(
 
 
 def extract_hashtags(post: dict[str, Any]) -> set[str]:
-    """Lower-cased hashtags from a post's text and its richtext tag facets."""
+    """
+    Every hashtag in a Bluesky post, lower-cased and without the "#".
+
+    Bluesky can mark a hashtag in two ways: as "#word" in the plain text, and
+    as a "facet" (a note saying "characters 10-15 of the text are the tag
+    'word'"). Both are read, so a tag is found either way.
+
+    :param post: the post record's JSON content.
+    :returns: the hashtags found.
+    """
     text = post.get("text")
     tags = set()
     if isinstance(text, str):
@@ -244,7 +342,10 @@ def extract_hashtags(post: dict[str, Any]) -> set[str]:
 
 def _facet_tags(facets: Any) -> set[str]:
     """
-    Lower-cased tags from a post's richtext tag facets.
+    Lower-cased tags from a post's tag facets.
+
+    A facet marks a span of a post's text as a link, a mention or a tag; only
+    the tag features (TAG_FACET) are read.
 
     :param facets: the post's "facets" value (untrusted; may be malformed).
     :returns: The tags found, without a leading "#".
@@ -266,7 +367,13 @@ def _facet_tags(facets: Any) -> set[str]:
 
 
 class CommitProcessor:
-    """Applies Jetstream commits for events, listeners and posts."""
+    """
+    Applies record changes from the network to our event index.
+
+    Handles three record types: events, listeners (a host's "show my posts
+    with this hashtag on my event") and Bluesky posts from those hosts.
+    Every other record type is ignored.
+    """
 
     def __init__(
         self,
@@ -281,8 +388,10 @@ class CommitProcessor:
 
         :param store: the event store.
         :param notifier: tells subscribers about changes.
-        :param handle_resolver: looks up author handles, or None to skip.
-        :param on_listeners_changed: called with the new listener DIDs.
+        :param handle_resolver: looks up each author's username (handle)
+            from their account id (DID), or None to skip.
+        :param on_listeners_changed: called with the account ids of every
+            host that now has a listener, whenever that list changes.
         :param clock: returns the current time (injected for tests).
         """
         self.store = store
@@ -292,7 +401,11 @@ class CommitProcessor:
         self.clock = clock
 
     async def handle(self, message: dict[str, Any]) -> None:
-        """Apply one Jetstream message; unusable messages are ignored."""
+        """
+        Apply one Jetstream message; unusable messages are ignored.
+
+        :param message: one decoded Jetstream message (untrusted JSON).
+        """
         commit = parse_commit(message)
         if commit is None:
             return
@@ -306,7 +419,11 @@ class CommitProcessor:
     # events
 
     async def _handle_event_commit(self, commit: Commit) -> None:
-        """Index, update or delete an event record."""
+        """
+        Add, update or delete one event in the index.
+
+        :param commit: a change to an app.communitymap.event record.
+        """
         if commit.operation == "delete":
             await self._delete_event(commit.uri)
             return
@@ -334,7 +451,11 @@ class CommitProcessor:
         await index_event(self.store, self.notifier, event, existing)
 
     async def _delete_event(self, uri: str) -> None:
-        """Tell subscribers an event was cancelled, then delete it."""
+        """
+        Tell subscribers an event was cancelled, then delete it.
+
+        :param uri: the AT URI of the deleted event record.
+        """
         existing = self.store.get_event(uri)
         if existing is None:
             return
@@ -347,7 +468,13 @@ class CommitProcessor:
     async def _author_handle(
         self, did: str, existing: IndexedEvent | None
     ) -> str | None:
-        """Return the author's handle, reusing the stored one if known."""
+        """
+        Return the author's username, reusing the stored one if known.
+
+        :param did: the author's permanent account id.
+        :param existing: the stored version of the event, or None.
+        :returns: the handle, or None when it cannot be looked up.
+        """
         if existing is not None and existing.author_handle:
             return existing.author_handle
         if self.handle_resolver is None:
@@ -357,7 +484,15 @@ class CommitProcessor:
     # listeners
 
     async def _handle_listener_commit(self, commit: Commit) -> None:
-        """Store or delete a listener; report if the DID set changed."""
+        """
+        Store or delete a listener record.
+
+        When the set of hosts with a listener changes, on_listeners_changed
+        is told, so the Jetstream client can start following the posts of
+        exactly those accounts.
+
+        :param commit: a change to an app.communitymap.listener record.
+        """
         before = self.store.listener_dids()
         if commit.operation == "delete":
             self.store.delete_listener(commit.uri)
@@ -374,8 +509,14 @@ class CommitProcessor:
 
     def _parse_listener(self, commit: Commit) -> Listener | None:
         """
-        Validate a listener record; it must point at the author's own
-        event. Returns None (and logs) when it is invalid.
+        Validate a listener record; it must point at the author's own event.
+
+        The check compares account ids: the event's AT URI must start with
+        at://<the listener author's DID>/app.communitymap.event/, so nobody
+        can attach their posts to someone else's event.
+
+        :param commit: a create or update of a listener record.
+        :returns: the listener, or None (and a log line) when it is invalid.
         """
         try:
             record = ListenerRecord.model_validate(commit.record or {})
@@ -399,7 +540,14 @@ class CommitProcessor:
     # posts
 
     async def _handle_post_commit(self, commit: Commit) -> None:
-        """Turn a post with a listened-for hashtag into announcements."""
+        """
+        Attach a host's hashtagged Bluesky post to their events.
+
+        The post becomes an announcement on every event that has a listener
+        for one of the post's hashtags.
+
+        :param commit: the creation of an app.bsky.feed.post record.
+        """
         listeners = self.store.listeners_for_did(commit.did)
         if not listeners or commit.record is None:
             return

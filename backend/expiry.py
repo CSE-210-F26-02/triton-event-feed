@@ -1,4 +1,6 @@
-"""Periodic removal of ended events, notifying subscribers first."""
+"""
+Periodic removal of ended events, notifying subscribers first.
+"""
 
 from __future__ import annotations
 
@@ -17,7 +19,12 @@ _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 def _as_utc(moment: datetime) -> datetime:
-    """Treat a naive datetime as UTC; leave aware ones unchanged."""
+    """
+    Treat a naive datetime as UTC; leave aware ones unchanged.
+
+    :param moment: the time to normalise.
+    :returns: an aware datetime.
+    """
     if moment.tzinfo is None:
         return moment.replace(tzinfo=UTC)
     return moment
@@ -50,7 +57,13 @@ def _expired_events(store: EventStore, cutoff: datetime) -> list[IndexedEvent]:
 async def _notify_and_unsubscribe(
     store: EventStore, notifier: Notifier, event: IndexedEvent
 ) -> None:
-    """Tell an expired event's subscribers it has ended, then drop them."""
+    """
+    Tell an expired event's subscribers it has ended, then drop them.
+
+    :param store: the event index.
+    :param notifier: sends the "expired" notifications.
+    :param event: the event that has ended.
+    """
     subscribers = store.subscribers_of(event.uri)
     if not subscribers:
         return

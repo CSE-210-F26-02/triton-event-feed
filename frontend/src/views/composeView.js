@@ -1,5 +1,6 @@
 /**
- * Create / edit event form in a <dialog>, validated client-side against the lexicon.
+ * Create / edit event form in a <dialog>, validated client-side against the event
+ * record's schema (its lexicon, lexicons/app/communitymap/event.json).
  * @module views/composeView
  */
 import { closeDialog, createElementTree, openDialog } from "../dom.js";

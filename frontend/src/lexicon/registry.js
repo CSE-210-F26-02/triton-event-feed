@@ -1,6 +1,10 @@
 /**
  * The one @atproto/lexicon registry shared by every validator in src/lexicon/.
  *
+ * A "lexicon" is the AT Protocol word for a record schema: the fields one type of record
+ * may have, with their types and limits. The registry holds every schema we validate
+ * against, so @atproto/lexicon can check a record by its type name (NSID).
+ *
  * Each of this app's lexicons is read straight from lexicons/ at the repo root, so the
  * validators can never drift from the schemas. To add a lexicon: import its JSON here,
  * add it to the registry, and write a validate<Name>.js next to validateEvent.js.
@@ -11,7 +15,8 @@ import eventLexicon from "../../../lexicons/app/communitymap/event.json";
 import subscriptionLexicon from "../../../lexicons/app/communitymap/subscription.json";
 
 /**
- * The standard AT Protocol strongRef lexicon (a record's uri + cid). The event's `group`
+ * The standard AT Protocol strongRef lexicon: a pointer to one exact version of a record,
+ * {uri: its address, cid: its version fingerprint}. The event's `group`
  * and the subscription's `subject` point to it, so the registry needs to know it.
  * Copied from the official definition in the atproto repo.
  */

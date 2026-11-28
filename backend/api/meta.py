@@ -1,4 +1,6 @@
-"""GET /api/health and GET /api/config: liveness and public app config."""
+"""
+GET /api/health and GET /api/config: liveness and public app config.
+"""
 
 from typing import Annotated
 
@@ -13,7 +15,11 @@ router = APIRouter(prefix="/api")
 
 @router.get("/health")
 def health() -> dict[str, bool]:
-    """Report that the API is up (used by e2e tests and load balancers)."""
+    """
+    Report that the API is up (used by e2e tests and load balancers).
+
+    :returns: {"ok": True}.
+    """
     return {"ok": True}
 
 
@@ -25,7 +31,8 @@ def config(
     Return the settings the frontend needs to pick its behaviour.
 
     :param settings: the validated backend settings.
-    :returns: Whether demo mode and Jetstream are on, and the record NSIDs.
+    :returns: Whether demo mode and the live network feed (Jetstream) are
+        on, and the names (NSIDs) of our event and listener record types.
     """
     return {
         "devMode": settings.dev_mode,

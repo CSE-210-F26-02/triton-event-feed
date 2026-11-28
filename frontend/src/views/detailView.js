@@ -3,7 +3,8 @@
  * about one event (when, where, what, who) plus a small pin map and the action slots for
  * Subscribe (#19), host Edit/Delete (#9), Get directions (#22) and Add to calendar (#23).
  *
- * Every event is read through the app.communitymap.event lexicon (lexicon/eventView.js):
+ * Every event is read through the app.communitymap.event lexicon, the schema of an event
+ * record (lexicon/eventView.js):
  * the view renders a sanitized "display event", and records that break the lexicon are
  * shown best-effort with a warning instead of being trusted blindly.
  * @module views/detailView

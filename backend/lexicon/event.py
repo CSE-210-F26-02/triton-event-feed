@@ -1,9 +1,17 @@
 """
 Validator for app.communitymap.event records.
 
-The schema lives in lexicons/app/communitymap/event.json at the repo root.
-This module reads its size limits from that file, so the numbers here can
-never go out of date. See docs/adr/0001-event-lexicon.md for the reasoning.
+An event "record" is the JSON a host saves in their own AT Protocol account
+when they create an event; "app.communitymap.event" is the name of that
+record type (its NSID). The record's schema, its "lexicon", lives in
+lexicons/app/communitymap/event.json at the repo root. The server that
+stores the host's account does not know our schema, so a record can arrive
+with any content at all; this module is what rejects bad ones. (Terms:
+docs/projects/triton-event-feed/AT_PROTOCOL_GLOSSARY.md)
+
+This module reads its size limits from the lexicon file, so the numbers here
+can never go out of date. The reasoning is in
+docs/projects/triton-event-feed/ADR/Event-Lexicon.md.
 
 The frontend has its own validator (frontend/src/lexicon/validateEvent.js).
 Both are tested against the same example records in fixtures/event/, which
@@ -52,7 +60,8 @@ LOCATION_PROPS: dict[str, dict] = _LOCATION["properties"]
 EVENT_REQUIRED: list[str] = _RECORD["required"]
 LOCATION_REQUIRED: list[str] = _LOCATION["required"]
 
-# AT Protocol datetime: "2026-12-01T18:00:00.000Z" or "...-08:00".
+# The datetime format every AT Protocol record uses:
+# "2026-12-01T18:00:00.000Z" or "...-08:00".
 # Uppercase T, seconds required, fractional seconds optional, and a timezone
 # (Z or +HH:MM / -HH:MM) required.
 _DATETIME_RE = re.compile(
@@ -73,6 +82,9 @@ def count_graphemes(text: str) -> int:
 
     One emoji or one accented letter counts as 1, even when it is made of
     several Unicode code points. The \\X pattern matches one such character.
+
+    :param text: the text to measure.
+    :returns: the number of visible characters.
     """
     return len(regex.findall(r"\X", text))
 
@@ -83,6 +95,11 @@ def _check_string(value: Any, field: str, rules: dict) -> list[str]:
 
     maxLength and minLength are measured in UTF-8 bytes, and maxGraphemes
     in visible characters, as the AT Protocol lexicon spec defines them.
+
+    :param value: the field's value (untrusted).
+    :param field: the field's name, used in the error messages.
+    :param rules: the field's rules from the lexicon file.
+    :returns: one message per broken rule (empty when it is fine).
     """
     if not isinstance(value, str):
         return [f"{field} must be a string"]
@@ -107,10 +124,15 @@ def _check_string(value: Any, field: str, rules: dict) -> list[str]:
 
 def parse_datetime(value: Any) -> datetime | None:
     """
-    Return a datetime if value is a valid AT Protocol datetime string.
+    Parse an AT Protocol datetime string.
 
-    Returns None if it isn't (wrong type, wrong format, timezone "-00:00",
-    or an impossible date such as February 30).
+    The format is ISO 8601 with seconds and a timezone, e.g.
+    "2026-12-01T18:00:00.000Z".
+
+    :param value: the string to parse (untrusted).
+    :returns: the datetime, or None if value is not valid (wrong type, wrong
+        format, timezone "-00:00", or an impossible date such as February
+        30).
     """
     if not isinstance(value, str):
         return None
@@ -130,7 +152,13 @@ def parse_datetime(value: Any) -> datetime | None:
 
 
 def _check_datetime(value: Any, field: str) -> list[str]:
-    """Check that a field holds a valid AT Protocol datetime string."""
+    """
+    Check that a field holds a valid AT Protocol datetime string.
+
+    :param value: the field's value (untrusted).
+    :param field: the field's name, used in the error messages.
+    :returns: one message when it is invalid (empty when it is fine).
+    """
     if parse_datetime(value) is None:
         return [
             f"{field} must be a datetime with a timezone, "
@@ -140,7 +168,13 @@ def _check_datetime(value: Any, field: str) -> list[str]:
 
 
 def _check_coordinate(value: Any, field: str) -> list[str]:
-    """Check a lat or lng: a decimal-number string within range."""
+    """
+    Check a lat or lng: a decimal-number string within range.
+
+    :param value: the coordinate (untrusted).
+    :param field: "lat" or "lng".
+    :returns: one message per problem (empty when it is fine).
+    """
     name = f"location.{field}"
     errors = _check_string(value, name, LOCATION_PROPS[field])
     if errors:
@@ -154,7 +188,12 @@ def _check_coordinate(value: Any, field: str) -> list[str]:
 
 
 def _check_location(location: Any) -> list[str]:
-    """Check the location object: required lat/lng plus optional text."""
+    """
+    Check the location object: required lat/lng plus optional text.
+
+    :param location: the record's "location" value (untrusted).
+    :returns: one message per problem (empty when it is fine).
+    """
     if not isinstance(location, dict):
         return ["location must be an object"]
 
@@ -174,7 +213,12 @@ def _check_location(location: Any) -> list[str]:
 
 
 def _check_tags(tags: Any) -> list[str]:
-    """Check the tags list: how many there are, and each tag's length."""
+    """
+    Check the tags list: how many there are, and each tag's length.
+
+    :param tags: the record's "tags" value (untrusted).
+    :returns: one message per problem (empty when it is fine).
+    """
     if not isinstance(tags, list):
         return ["tags must be a list"]
 
@@ -190,7 +234,16 @@ def _check_tags(tags: Any) -> list[str]:
 
 
 def _check_group(group: Any) -> list[str]:
-    """Check the group strongRef: {"uri": "at://...", "cid": "..."}."""
+    """
+    Check the group field: a pointer to the group the event belongs to.
+
+    It is a "strongRef", {"uri": "at://...", "cid": "..."}: the group
+    record's address on the network (AT URI) plus a fingerprint (CID) of the
+    exact version that was linked.
+
+    :param group: the field's value (untrusted).
+    :returns: one message per problem (empty when it is fine).
+    """
     if not isinstance(group, dict):
         return ["group must be an object with uri and cid"]
 
@@ -208,7 +261,8 @@ def validate_event(record: Any) -> list[str]:
     """
     Check an app.communitymap.event record.
 
-    :param record: the event as a dict (e.g. parsed JSON from a PDS).
+    :param record: the event as a dict (e.g. parsed JSON read from the
+        host's account server, their PDS).
     :returns: A list of error messages. An empty list means the record is
         valid. Each message starts with the field it is about, for example
         "name must be at most 100 characters".

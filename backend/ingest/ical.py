@@ -71,7 +71,16 @@ def _sha1_hex(text: str) -> str:
 
 
 def event_uri(feed_url: str, uid: str) -> str:
-    """Stable ical:// URI for one VEVENT of one feed."""
+    """
+    Build the stable ical:// id of one calendar entry (VEVENT) of one feed.
+
+    The same feed and UID always give the same id, so re-importing a feed
+    updates its events instead of duplicating them.
+
+    :param feed_url: the feed's URL.
+    :param uid: the entry's UID, unique within the feed.
+    :returns: e.g. "ical://3f2a9c1b/8e7d6c5b4a39".
+    """
     feed_hash = _sha1_hex(feed_url)[:FEED_HASH_LENGTH]
     uid_hash = _sha1_hex(uid)[:UID_HASH_LENGTH]
     return f"ical://{feed_hash}/{uid_hash}"
@@ -82,6 +91,9 @@ def _to_utc(value: date | datetime) -> datetime:
     Convert an iCal date or datetime to an aware UTC datetime.
 
     A naive datetime is treated as UTC; a date (all-day) becomes midnight.
+
+    :param value: the DTSTART, DTEND or CREATED value.
+    :returns: the moment, in UTC.
     """
     if isinstance(value, datetime):
         if value.tzinfo is None:
@@ -117,7 +129,14 @@ def _start_and_end(vevent: Event) -> tuple[datetime, datetime]:
 def _text_property(
     vevent: Event, property_name: str, max_length: int
 ) -> str | None:
-    """Return a trimmed, truncated text property, or None if blank."""
+    """
+    Read a text property, trimmed and truncated.
+
+    :param vevent: one event (VEVENT) from the feed.
+    :param property_name: e.g. "SUMMARY" or "DESCRIPTION".
+    :param max_length: the most characters to keep.
+    :returns: the text, or None when it is missing or blank.
+    """
     value = vevent.get(property_name)
     if value is None:
         return None
@@ -125,7 +144,12 @@ def _text_property(
 
 
 def _location(vevent: Event) -> Location:
-    """Build the event's Location from LOCATION and GEO."""
+    """
+    Build the event's Location from its LOCATION and GEO properties.
+
+    :param vevent: one event (VEVENT) from the feed.
+    :returns: the location; NO_LOCATION names it when LOCATION is blank.
+    """
     name = _text_property(vevent, "LOCATION", MAX_NAME_LENGTH) or NO_LOCATION
     geo_coordinates = vevent.get("GEO")
     if geo_coordinates is None:
@@ -139,8 +163,14 @@ def _location(vevent: Event) -> Location:
 
 def _event_record(vevent: Event, now: datetime) -> EventRecord:
     """
-    Build the lexicon record for one VEVENT.
+    Build our event record from one calendar entry (VEVENT).
 
+    The result has the same shape as an app.communitymap.event record that
+    a host publishes, so imported and published events are handled alike.
+
+    :param vevent: one event (VEVENT) from the feed.
+    :param now: the current time, used as createdAt when CREATED is absent.
+    :returns: the event record.
     :raises ValidationError: when the VEVENT does not make a valid record.
     """
     starts_at, ends_at = _start_and_end(vevent)
@@ -165,6 +195,11 @@ def _indexed_event(
     """
     Build the indexed event for one VEVENT, or None if it has ended.
 
+    :param vevent: one event (VEVENT) from the feed.
+    :param feed_url: the feed's URL, part of the event's id.
+    :param author: who the event is credited to (the feed's host name).
+    :param now: the current time.
+    :returns: the event, or None when it has already ended.
     :raises ValueError: when the VEVENT has no UID.
     """
     uid = _text_property(vevent, "UID", MAX_UID_LENGTH)
@@ -213,7 +248,15 @@ def parse_ics(text: str, feed_url: str, now: datetime) -> list[IndexedEvent]:
 def _keep_created_at(
     event: IndexedEvent, existing: IndexedEvent | None
 ) -> IndexedEvent:
-    """Feeds rarely carry CREATED, so keep the first-seen createdAt."""
+    """
+    Keep the first-seen createdAt of an event that was imported before.
+
+    Feeds rarely carry CREATED, so every import would otherwise reset it.
+
+    :param event: the event just built from the feed.
+    :param existing: the stored version, or None for a new event.
+    :returns: event, with the stored createdAt when there is one.
+    """
     if existing is None:
         return event
     record = event.record.model_copy(
@@ -292,7 +335,15 @@ async def _import_logged(
     client: httpx.AsyncClient,
     clock: Clock,
 ) -> None:
-    """Import one feed, logging (not raising) any failure."""
+    """
+    Import one feed, logging (not raising) any failure.
+
+    :param url: the feed's URL.
+    :param store: the event index.
+    :param notifier: tells subscribers about changed events.
+    :param client: the HTTP client that downloads the feed.
+    :param clock: returns the current time.
+    """
     try:
         imported_count = await import_feed(url, store, notifier, client, clock)
         logger.info("imported %d events from %s", imported_count, url)

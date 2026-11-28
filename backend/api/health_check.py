@@ -12,6 +12,7 @@ health_router = APIRouter(prefix="/api/health", tags=["Health"])
 async def health_check():
     """
     Health check endpoint to verify if the API is running.
-    Returns a JSON response with a status message.
+
+    :returns: a 200 JSON response with a status message.
     """
     return JSONResponse(content={"status": "API is running"}, status_code=200)

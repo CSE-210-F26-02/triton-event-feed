@@ -1,5 +1,10 @@
 /**
- * Lexicon record building + validation (mirrors lexicons/*.json), shared by both writers.
+ * Building and validating the records this app saves, shared by both writers.
+ *
+ * A "record" is one JSON document saved in a user's AT Protocol account (an event, a
+ * listener, ...). Each record type has a schema, its "lexicon", in lexicons/*.json; the
+ * functions here mirror those schemas. Terms:
+ * docs/projects/triton-event-feed/AT_PROTOCOL_GLOSSARY.md
  * @module records
  */
 
@@ -80,7 +85,7 @@ const isDate = (value) =>
   typeof value === "string" && value !== "" && !Number.isNaN(Date.parse(value));
 
 /**
- * Validate an event record against the lexicon. Returns field → message (empty = valid).
+ * Validate an event record against its schema (lexicon). Returns field → message (empty = valid).
  * Field keys: name, description, startsAt, endsAt, locationName, address, coords, tags, group.
  * @param {object} record event record
  * @returns {Record<string, string>}
@@ -146,7 +151,8 @@ export function validateHashtag(tag) {
 }
 
 /**
- * Parse an at:// URI (at://<repo DID>/<collection NSID>/<record key>).
+ * Split a record's address, its AT URI, into its three parts:
+ * at://<owner's account DID>/<record type NSID>/<record key>.
  * @param {string} uri
  * @returns {{repoDid: string, collection: string, recordKey: string}|null}
  *   repoDid: the DID of the account whose repository holds the record;

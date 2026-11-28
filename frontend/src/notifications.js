@@ -1,11 +1,13 @@
 /**
  * Live notifications for subscribed events: SSE stream with reconnect + backoff, catch-up
  * of anything missed while disconnected, toasts, and (when the tab is hidden) system
- * notifications. Split out of subscriptions.js when subscriptions moved to PDS records (#19).
+ * notifications. Split out of subscriptions.js when subscriptions moved into records in each
+ * user's own account, on their PDS (#19).
  *
  * STUB(#5 / delivery): the backend does not serve /api/notifications yet. The stream is
- * keyed by the subscriber's DID, because the indexer (#5) will learn who to notify from
- * the app.communitymap.subscription records on each user's PDS. Until then the stream
+ * keyed by the subscriber's DID (their permanent account id), because the indexer (#5)
+ * will learn who to notify from the app.communitymap.subscription records saved in each
+ * user's own account. Until then the stream
  * simply fails to connect and retries with backoff, which is harmless.
  * @module notifications
  */

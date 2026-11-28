@@ -1,3 +1,8 @@
+"""
+Tests for the CommitProcessor (ingest/processor.py): event, listener and
+post commits, change messages and hashtag extraction.
+"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -20,6 +25,12 @@ EVENT_URI = f"at://{AUTHOR_DID}/{EVENT_NSID}/ev1"
 
 
 def event_record(**overrides: Any) -> dict[str, Any]:
+    """
+    Build a valid event record's JSON, with fields replaced by overrides.
+
+    :param overrides: field values to replace, by camelCase name.
+    :returns: the record.
+    """
     record: dict[str, Any] = {
         "name": "Taco Night",
         "description": "Free tacos",
@@ -40,6 +51,16 @@ def commit(
     record: dict[str, Any] | None = None,
     did: str = AUTHOR_DID,
 ) -> dict[str, Any]:
+    """
+    Build a Jetstream commit message.
+
+    :param collection: the record type (NSID).
+    :param operation: "create", "update" or "delete".
+    :param rkey: the record key.
+    :param record: the record's content (omitted for deletes).
+    :param did: the author's permanent account id.
+    :returns: the decoded message.
+    """
     body: dict[str, Any] = {
         "operation": operation,
         "collection": collection,
@@ -54,6 +75,13 @@ def commit(
 def listener_record(
     subject: str = EVENT_URI, hashtag: str = "#TacoNight"
 ) -> dict[str, Any]:
+    """
+    Build a listener record's JSON.
+
+    :param subject: the AT URI of the event to attach posts to.
+    :param hashtag: the hashtag to listen for.
+    :returns: the record.
+    """
     return {
         "subject": subject,
         "hashtag": hashtag,
@@ -63,16 +91,34 @@ def listener_record(
 
 @pytest.fixture
 def store() -> FakeStore:
+    """
+    A fresh fake event index.
+
+    :returns: the store.
+    """
     return FakeStore()
 
 
 @pytest.fixture
 def notifier(store: FakeStore) -> FakeNotifier:
+    """
+    A fake notifier that records what it was asked to publish.
+
+    :param store: the test's fake store.
+    :returns: the notifier.
+    """
     return FakeNotifier(store)
 
 
 @pytest.fixture
 def processor(store: FakeStore, notifier: FakeNotifier) -> CommitProcessor:
+    """
+    A processor wired to the fakes, with a fixed clock.
+
+    :param store: the test's fake store.
+    :param notifier: the test's fake notifier.
+    :returns: the processor.
+    """
     return CommitProcessor(store, notifier, clock=lambda: FIXED_NOW)
 
 
@@ -271,6 +317,11 @@ async def test_async_listener_callback_awaited(
     seen: list[list[str]] = []
 
     async def record_changed_dids(dids: list[str]) -> None:
+        """
+        Record each new list of listener DIDs.
+
+        :param dids: the account ids of every host with a listener.
+        """
         seen.append(dids)
 
     processor = CommitProcessor(
@@ -288,6 +339,13 @@ async def test_async_listener_callback_awaited(
 def post(
     text: str, facets: list[dict[str, Any]] | None = None
 ) -> dict[str, Any]:
+    """
+    Build a Bluesky post record.
+
+    :param text: the post's text.
+    :param facets: its facets (link, mention and tag markers), if any.
+    :returns: the record.
+    """
     record: dict[str, Any] = {
         "$type": POST_NSID,
         "text": text,
@@ -299,6 +357,11 @@ def post(
 
 
 async def _with_listener(processor: CommitProcessor) -> None:
+    """
+    Create the test event and a listener for #TacoNight on it.
+
+    :param processor: the processor to feed the two commits to.
+    """
     await processor.handle(commit(EVENT_NSID, "create", "ev1", event_record()))
     await processor.handle(
         commit(LISTENER_NSID, "create", "l1", listener_record())

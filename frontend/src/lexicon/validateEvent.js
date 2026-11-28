@@ -1,9 +1,15 @@
 /**
  * Validator for app.communitymap.event records.
  *
- * The schema itself lives in lexicons/app/communitymap/event.json at the repo
- * root. This file reads that JSON directly, so the validator can never drift
- * from the schema. See docs/adr/0001-event-lexicon.md for the reasoning.
+ * An event "record" is the JSON a host saves in their own AT Protocol account when
+ * they create an event. The servers that store accounts (PDSes) do not know our schema
+ * and store whatever they are sent, so every record we read must be checked here.
+ * Terms: docs/projects/triton-event-feed/AT_PROTOCOL_GLOSSARY.md
+ *
+ * The schema itself, the "lexicon", lives in lexicons/app/communitymap/event.json at
+ * the repo root. This file reads that JSON directly, so the validator can never drift
+ * from the schema. The reasoning is in
+ * docs/projects/triton-event-feed/ADR/Event-Lexicon.md.
  *
  * Validation happens in two stages:
  *   1. Lexicon rules (required fields, types, lengths, datetime format) are
@@ -28,8 +34,9 @@ export const EVENT_NSID = "app.communitymap.event";
  */
 
 /**
+ * A pointer to one exact version of another record (AT Protocol "strongRef").
  * @typedef {object} StrongRef
- * @property {string} uri at:// address of the record.
+ * @property {string} uri at:// address of the record (its AT URI).
  * @property {string} cid Fingerprint of one exact version of the record.
  */
 
@@ -100,7 +107,7 @@ function checkCoordinate(value, field, min, max) {
  * Validates an app.communitymap.event record.
  *
  * @param {unknown} record The record to check (for example, a form's output
- *   before publishing, or a record read from a PDS).
+ *   before publishing, or a record read back from a host's account).
  * @returns {ValidationResult} { ok: true } if valid; otherwise
  *   { ok: false, errors } where each error has a path and a message.
  *
