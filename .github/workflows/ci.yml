@@ -1,0 +1,69 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Exact, hash-pinned versions from uv.lock (regenerate with
+      # `uv export --frozen --group dev --no-emit-project -o requirements-dev.lock`).
+      # Wheels only, so no package runs a setup script. The backend itself is not
+      # installed: pytest imports it from this directory (pyproject pythonpath).
+      - run: pip install --only-binary :all: --require-hashes -r requirements-dev.lock
+      - run: ruff check app tests
+      - run: ruff format --check app tests
+      - run: pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # Exact versions from package-lock.json; lifecycle scripts are not run.
+      - run: npm ci --ignore-scripts
+      - run: npm test
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    defaults:
+      run:
+        working-directory: e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Runtime dependencies only, hash-pinned and wheels only. serve.sh runs the
+      # backend from its own directory, so the backend is not installed.
+      - run: pip install --only-binary :all: --require-hashes -r ../backend/requirements.lock
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci --ignore-scripts
+      # npm scripts run the locally installed (package-lock pinned) Playwright,
+      # unlike npx, which could fetch and run a package on demand.
+      - run: npm run install-browsers
+      - run: npm test
+        env:
+          PYTHON: python
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: e2e/playwright-report
