@@ -23,6 +23,35 @@ describe("loginView", () => {
     expect(view.element.querySelector("#login-reason")).toBeNull();
   });
 
+  it("never shows stray text such as 'undefined' when there is no reason", () => {
+    const view = createLoginView({ login: vi.fn() });
+    for (const request of [
+      undefined,
+      {},
+      { reason: "" },
+      { reason: "   " },
+      { reason: 42 },
+    ]) {
+      view.open(request);
+      expect(view.element.querySelector("#login-reason")).toBeNull();
+      expect(view.element.textContent).not.toMatch(/undefined|null|false|42/);
+      // Only element children: the title, then the form.
+      const childNodes = [...view.element.childNodes];
+      expect(
+        childNodes.every((node) => node.nodeType === Node.ELEMENT_NODE),
+      ).toBe(true);
+      expect(childNodes.map((node) => node.tagName)).toEqual(["H2", "FORM"]);
+    }
+  });
+
+  it("trims the reason before showing it", () => {
+    const view = createLoginView({ login: vi.fn() });
+    view.open({ reason: "  Log in to see your subscriptions.  " });
+    expect(view.element.querySelector("#login-reason").textContent).toBe(
+      "Log in to see your subscriptions.",
+    );
+  });
+
   it("runs the global, then the per-open callback after a successful login", async () => {
     const order = [];
     const view = createLoginView({

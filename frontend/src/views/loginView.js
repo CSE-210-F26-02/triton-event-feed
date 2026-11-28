@@ -99,14 +99,31 @@ export function createLoginView({ login, onLoggedIn }) {
       await onLoggedIn?.();
       await afterThisLogin?.();
     });
+    // Native replaceChildren() turns non-node values into text, so a missing reason
+    // must be left out entirely (passing `undefined` would show the word "undefined").
+    const reasonNotice = renderLoginReason(reason);
     dialog.replaceChildren(
       createElementTree("h2", { id: "login-title" }, "Log in with Bluesky"),
-      reason &&
-        createElementTree("p", { class: "hint", id: "login-reason" }, reason),
+      ...(reasonNotice ? [reasonNotice] : []),
       form,
     );
     openDialog(dialog);
   }
 
   return { open, element: dialog };
+}
+
+/**
+ * The "why log in" line shown under the dialog title.
+ * @param {unknown} reason LoginRequest.reason
+ * @returns {HTMLElement|null} null when there is no reason to show (missing, not a
+ *   string, or only whitespace)
+ */
+function renderLoginReason(reason) {
+  if (typeof reason !== "string" || !reason.trim()) return null;
+  return createElementTree(
+    "p",
+    { class: "hint", id: "login-reason" },
+    reason.trim(),
+  );
 }
