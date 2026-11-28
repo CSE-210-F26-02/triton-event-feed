@@ -306,7 +306,8 @@ export function createComposeView({
       e.preventDefault();
       if (state.saving) return;
       state.saving = true;
-      submit(form, ev, status, state).finally(() => {
+      // submit() reports failures in the form status; void marks it as intentionally not awaited.
+      void submit(form, ev, status, state).finally(() => {
         state.saving = false;
       });
     });

@@ -27,6 +27,9 @@ import { createMapView } from "./views/mapView.js";
 
 const $ = (sel) => document.querySelector(sel);
 
+/** Wait before re-fetching after a write so the indexer has time to see the record. */
+const INDEXER_RECONCILE_DELAY_MS = 1500;
+
 /**
  * Start the app. API base comes from <meta name="cm-api-base"> (default: same origin).
  * @param {{baseUrl?: string}} [opts]
@@ -127,7 +130,7 @@ export async function start({
     if (!filters.nearMe) geo.clear();
     store.set({ filters });
     const refetch = ["tags", "group", "q"].some((k) => k in patch);
-    if (refetch) loadEvents();
+    if (refetch) void loadEvents();
   }
 
   const visibleEvents = () => {
@@ -160,11 +163,11 @@ export async function start({
       // Optimistic UI: show the event right away, then reconcile with the indexer.
       store.set({ events: upsertEvent(store.get().events, ev) });
       toast(res.isNew ? "Event posted." : "Event saved.");
-      detail.open(ev.uri, { preload: ev });
+      void detail.open(ev.uri, { preload: ev });
       setTimeout(() => {
-        loadEvents();
-        loadFacets();
-      }, 1500);
+        void loadEvents();
+        void loadFacets();
+      }, INDEXER_RECONCILE_DELAY_MS);
     },
     onDeleted: (uri) => {
       toast("Event deleted.");
@@ -182,7 +185,7 @@ export async function start({
   const datePicker = createDateFilter($("#event-date-filter"), {
     onChange: (dateFilter) => {
       store.set({ dateFilter });
-      loadEvents();
+      void loadEvents();
     },
   });
   const list = createListView($("#list"), {
@@ -244,7 +247,7 @@ export async function start({
         changeFilters({ tags: toggleTag(store.get().filters.tags, tag) }),
       onToggleSubscribe: toggleSubscribe,
     });
-    map.show(shown);
+    void map.show(shown);
   }
 
   function renderAccount() {
@@ -306,7 +309,7 @@ export async function start({
 
   store.subscribe(() => render());
   window.addEventListener("online", () => {
-    if (store.get().stale || store.get().error) loadEvents();
+    if (store.get().stale || store.get().error) void loadEvents();
     subs.reconnectNow();
   });
 
@@ -318,13 +321,16 @@ export async function start({
     /* offline with nothing cached: read-only */
   }
   renderAccount();
-  loadFacets();
-  loadEvents();
-  subs.load();
+  // Each loader catches its own errors and reports them through the store.
+  void loadFacets();
+  void loadEvents();
+  void subs.load();
   registerServiceWorker();
 }
 
 const PENDING_TTL_MS = 2 * 60 * 1000;
+const STARTUP_FAILURE_MESSAGE =
+  "Something went wrong while loading the app. Please reload the page.";
 
 /**
  * EventView for a record we just wrote but the indexer may not have seen yet.
@@ -387,6 +393,24 @@ function dedupe(events) {
   return events.filter((e) => !seen.has(e.uri) && seen.add(e.uri));
 }
 
+/**
+ * Last-resort handler for errors that escape `start()` (e.g. required DOM missing).
+ * Logs the cause and tells the user the page needs a reload instead of failing silently.
+ * @param {unknown} error the rejection reason from `start()`
+ * @param {Document} [doc=document] document to render the message into
+ * @returns {void}
+ */
+export function reportStartupFailure(error, doc = document) {
+  console.error("Triton Event Feed failed to start:", error);
+  const list = doc?.querySelector?.("#list");
+  if (!list) return;
+  const message = doc.createElement("p");
+  message.className = "notice notice--error";
+  message.setAttribute("role", "alert");
+  message.textContent = STARTUP_FAILURE_MESSAGE;
+  list.replaceChildren(message);
+}
+
 function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
   navigator.serviceWorker
@@ -402,5 +426,5 @@ if (
   !globalThis.__CM_NO_AUTOSTART__ &&
   document.querySelector("#list")
 ) {
-  start();
+  start().catch(reportStartupFailure);
 }

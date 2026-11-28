@@ -5,8 +5,13 @@ import { jsonResponse, memoryStorage, sampleEvent } from "./helpers.js";
 import { dayKey } from "../src/filters.js";
 
 globalThis.__CM_NO_AUTOSTART__ = true;
-const { start, pendingEventView, upsertEvent, keepPending } =
-  await import("../src/app.js");
+const {
+  start,
+  pendingEventView,
+  upsertEvent,
+  keepPending,
+  reportStartupFailure,
+} = await import("../src/app.js");
 
 const html = readFileSync(resolve(__dirname, "../index.html"), "utf8");
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -292,5 +297,35 @@ describe("optimistic event helpers", () => {
     );
     const indexed = sampleEvent({ uri: "p" });
     expect(keepPending([indexed], [pending], now)).toEqual([indexed]);
+  });
+});
+
+describe("reportStartupFailure", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("logs the error and replaces the list with an alert", () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    document.body.innerHTML = '<div id="list"><p>Loading…</p></div>';
+    const error = new Error("boom");
+    reportStartupFailure(error, document);
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("failed to start"),
+      error,
+    );
+    const alert = document.querySelector("#list [role=alert]");
+    expect(alert.textContent).toMatch(/reload the page/);
+    expect(document.querySelectorAll("#list > *")).toHaveLength(1);
+  });
+
+  it("only logs when there is no list to render into", () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    document.body.innerHTML = "";
+    expect(() => reportStartupFailure("bad", document)).not.toThrow();
+    expect(() => reportStartupFailure("bad", null)).not.toThrow();
+    expect(consoleError).toHaveBeenCalledTimes(2);
   });
 });

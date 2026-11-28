@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createListView, renderCard } from "../src/views/listView.js";
+import { createListView, hashId, renderCard } from "../src/views/listView.js";
 import { sampleEvent } from "./helpers.js";
 
 describe("renderCard", () => {
@@ -166,4 +166,33 @@ describe("createListView", () => {
     v.render({ events: [e], subscribed: new Set([e.uri]), now });
     expect(document.activeElement.textContent).toBe("Subscribed");
   });
+});
+
+describe("hashId", () => {
+  // Expected values come from the previous `(x * 31 + c) | 0` implementation, so
+  // DOM ids (and anything keyed on them) are unchanged by the Math.imul rewrite.
+  it.each([
+    ["", "0"],
+    ["a", "2p"],
+    ["at://did:plc:abc/community.lexicon.calendar.event/3k", "5sm04g"],
+  ])("hashes %p to %p", (input, expected) => {
+    expect(hashId(input)).toBe(expected);
+  });
+
+  it("stays a 32-bit hash for long inputs instead of overflowing", () => {
+    expect(hashId("x".repeat(500))).toBe("p4fytc");
+  });
+
+  it("only emits base-36 characters and is deterministic", () => {
+    const uri = "at://did:plc:xyz/community.lexicon.calendar.event/abc";
+    expect(hashId(uri)).toMatch(/^[0-9a-z]+$/);
+    expect(hashId(uri)).toBe(hashId(uri));
+  });
+
+  it.each([undefined, null, 42, {}])(
+    "treats non-string input %p as empty",
+    (input) => {
+      expect(hashId(input)).toBe("0");
+    },
+  );
 });

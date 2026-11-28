@@ -84,11 +84,25 @@ self.addEventListener("fetch", (event) => {
   );
 });
 
+/**
+ * Store a response copy without letting a cache failure (e.g. quota exceeded)
+ * break the response already being returned to the page.
+ * @param {Cache} cache destination cache
+ * @param {Request} req request key
+ * @param {Response} res response copy to store (already cloned by the caller)
+ * @returns {Promise<void>} always resolves
+ */
+function cacheResponseQuietly(cache, req, res) {
+  return cache.put(req, res).catch((err) => {
+    console.warn("Service worker could not cache", req.url, err);
+  });
+}
+
 async function networkFirst(req) {
   const cache = await caches.open(API_CACHE);
   try {
     const res = await fetch(req);
-    if (res.ok) cache.put(req, res.clone());
+    if (res.ok) void cacheResponseQuietly(cache, req, res.clone());
     return res;
   } catch (err) {
     const hit = await cache.match(req);
@@ -107,6 +121,7 @@ async function cacheFirst(req) {
   const hit = await caches.match(req, { ignoreSearch: true });
   if (hit) return hit;
   const res = await fetch(req);
-  if (res.ok) (await caches.open(SHELL_CACHE)).put(req, res.clone());
+  if (res.ok)
+    void cacheResponseQuietly(await caches.open(SHELL_CACHE), req, res.clone());
   return res;
 }

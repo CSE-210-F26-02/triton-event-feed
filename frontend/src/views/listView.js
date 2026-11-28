@@ -124,10 +124,23 @@ export function renderCard(ev, opts = {}) {
   );
 }
 
-function hashId(s) {
-  let x = 0;
-  for (let i = 0; i < s.length; i++) x = (x * 31 + s.charCodeAt(i)) | 0;
-  return (x >>> 0).toString(36);
+const HASH_ID_MULTIPLIER = 31;
+const HASH_ID_RADIX = 36;
+
+/**
+ * Stable, DOM-id-safe hash of a string (32-bit Java-style string hash, base-36).
+ * `Math.imul` keeps the multiply in 32-bit space and `>>> 0` wraps the running
+ * value to an unsigned 32-bit integer, so long inputs never lose precision.
+ * @param {string} value text to hash, typically an event URI
+ * @returns {string} base-36 digits; "0" for empty or non-string input
+ */
+export function hashId(value) {
+  const text = typeof value === "string" ? value : "";
+  let hash = 0;
+  for (let index = 0; index < text.length; index++) {
+    hash = (Math.imul(hash, HASH_ID_MULTIPLIER) + text.charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(HASH_ID_RADIX);
 }
 
 /**

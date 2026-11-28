@@ -7,6 +7,15 @@ const emptySelection = () => ({
   start: "",
   end: "",
 });
+/**
+ * Chronological comparator for `YYYY-MM-DD` day keys. Zero-padded ISO keys order the
+ * same lexically and chronologically, so an explicit string comparison is enough.
+ * @param {string} firstDayKey
+ * @param {string} secondDayKey
+ * @returns {number} negative, zero or positive, as required by Array#sort
+ */
+export const compareDayKeys = (firstDayKey, secondDayKey) =>
+  firstDayKey.localeCompare(secondDayKey);
 const formatDay = (key) =>
   new Intl.DateTimeFormat("en-US", {
     month: "short",
@@ -97,12 +106,12 @@ export function createDateFilter(root, { onChange, now = new Date() }) {
     if (draft.mode === "multiple") {
       draft.dates = draft.dates.includes(key)
         ? draft.dates.filter((d) => d !== key)
-        : [...draft.dates, key].sort();
+        : [...draft.dates, key].sort(compareDayKeys);
     } else if (!draft.start || draft.end) {
       draft.start = key;
       draft.end = "";
     } else {
-      [draft.start, draft.end] = [draft.start, key].sort();
+      [draft.start, draft.end] = [draft.start, key].sort(compareDayKeys);
     }
     draw();
     picker.querySelector(`[data-date="${key}"]`)?.focus();

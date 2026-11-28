@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDetailView, renderDetail } from "../src/views/detailView.js";
 import { createFilterBar } from "../src/views/filterBar.js";
 import {
@@ -105,6 +105,10 @@ function fakeLeaflet() {
 }
 
 describe("detailView", () => {
+  // openDialog() attaches each dialog to document.body. Remove them between tests so
+  // a previous test's #detail-title can't shadow the current one (duplicate ids).
+  afterEach(() => document.body.replaceChildren());
+
   it("renders description and updates newest first, escaped", () => {
     const ev = sampleEvent({
       description: "<b>Bring</b> a plate",

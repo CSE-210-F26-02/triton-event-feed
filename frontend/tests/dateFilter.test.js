@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { filterEventsByDate } from "../src/filters.js";
-import { createDateFilter } from "../src/views/dateFilter.js";
+import { compareDayKeys, createDateFilter } from "../src/views/dateFilter.js";
 
 const selection = (dates) => ({ mode: "multiple", dates });
 const event = (startsAt, endsAt) => ({ startsAt, endsAt });
@@ -135,5 +135,23 @@ describe("date picker", () => {
     expect(
       root.querySelector(".date-filter__trigger").getAttribute("aria-expanded"),
     ).toBe("false");
+  });
+});
+
+describe("compareDayKeys", () => {
+  it("orders day keys chronologically across months and years", () => {
+    const keys = ["2027-01-02", "2026-11-21", "2026-12-01", "2026-11-03"];
+    expect([...keys].sort(compareDayKeys)).toEqual([
+      "2026-11-03",
+      "2026-11-21",
+      "2026-12-01",
+      "2027-01-02",
+    ]);
+  });
+
+  it("returns 0 for equal keys and a signed result otherwise", () => {
+    expect(compareDayKeys("2026-11-21", "2026-11-21")).toBe(0);
+    expect(compareDayKeys("2026-11-20", "2026-11-21")).toBeLessThan(0);
+    expect(compareDayKeys("2026-11-22", "2026-11-21")).toBeGreaterThan(0);
   });
 });

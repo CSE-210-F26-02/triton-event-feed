@@ -20,18 +20,36 @@ export function debounce(fn, ms) {
   return wrapped;
 }
 
+const RANDOM_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz234567";
+const DEFAULT_RANDOM_ID_LENGTH = 16;
+
 /**
- * Random lowercase base32-ish id (uses crypto when available).
- * @param {number} [len=16]
+ * Random lowercase base32 id drawn from the Web Crypto CSPRNG.
+ * There is deliberately no `Math.random` fallback: ids may identify subscribers,
+ * so a predictable generator is unsafe. Web Crypto exists in every supported
+ * browser and in Node 19+.
+ * @param {number} [length=16] number of characters (a positive integer)
+ * @param {{getRandomValues?: Function}|undefined} [cryptoImpl=globalThis.crypto]
  * @returns {string}
+ * @throws {RangeError} when `length` is not a positive integer
+ * @throws {Error} when no secure random number generator is available
  */
-export function randomId(len = 16) {
-  const alphabet = "abcdefghijklmnopqrstuvwxyz234567";
-  const bytes = new Uint8Array(len);
-  if (globalThis.crypto?.getRandomValues)
-    globalThis.crypto.getRandomValues(bytes);
-  else for (let i = 0; i < len; i++) bytes[i] = Math.floor(Math.random() * 256);
-  return Array.from(bytes, (b) => alphabet[b % 32]).join("");
+export function randomId(
+  length = DEFAULT_RANDOM_ID_LENGTH,
+  cryptoImpl = globalThis.crypto,
+) {
+  if (!Number.isInteger(length) || length <= 0)
+    throw new RangeError(
+      `randomId length must be a positive integer, got ${length}`,
+    );
+  if (typeof cryptoImpl?.getRandomValues !== "function")
+    throw new Error("randomId requires crypto.getRandomValues (Web Crypto)");
+  const bytes = cryptoImpl.getRandomValues(new Uint8Array(length));
+  // 256 is a multiple of the 32-letter alphabet, so the modulo adds no bias.
+  return Array.from(
+    bytes,
+    (byte) => RANDOM_ID_ALPHABET[byte % RANDOM_ID_ALPHABET.length],
+  ).join("");
 }
 
 /**

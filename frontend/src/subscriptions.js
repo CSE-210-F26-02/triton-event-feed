@@ -74,7 +74,7 @@ export function createSubscriptions({
   let timer = null;
 
   function parseLast(v) {
-    const n = v == null ? NaN : Number(v);
+    const n = v == null ? Number.NaN : Number(v);
     return Number.isFinite(n) ? n : null;
   }
 
@@ -125,7 +125,7 @@ export function createSubscriptions({
     source = new EventSourceImpl(api.notificationStreamUrl(subscriberId));
     source.onopen = () => {
       attempts = 0;
-      catchUp();
+      void catchUp(); // catches its own errors
     };
     source.onmessage = (ev) => {
       try {
@@ -194,7 +194,7 @@ export function createSubscriptions({
       } else {
         await api.subscribe(subscriberId, uri);
         subscribed.add(uri);
-        askPermissionOnce();
+        void askPermissionOnce(); // catches its own errors
       }
       changed();
       return subscribed.has(uri);
