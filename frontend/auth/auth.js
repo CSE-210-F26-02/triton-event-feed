@@ -1,11 +1,13 @@
-// Useful Link: https://github.com/bluesky-social/cookbook/tree/main/vanillajs-oauth-web-app#readme
+// Mostly follows https://github.com/bluesky-social/atproto/tree/main/packages/lex/lex
+// Another helpful link: https://github.com/bluesky-social/cookbook/tree/main/vanillajs-oauth-web-app#readme
 // Note privacy concerns with using BSky's handle resolver
-// Ended up using https://github.com/bluesky-social/atproto/tree/main/packages/api for the hybrid password/oauth implementation
 
-import { BrowserOAuthClient } from '@atproto/oauth-client-browser';
-import { Agent, CredentialSession } from '@atproto/api';
+import { BrowserOAuthClient, OAuthCallbackError } from '@atproto/oauth-client-browser';
+import { OAuthResolverError, OAuthSession } from '@atproto/oauth-client';
+import { PasswordSession } from '@atproto/lex-password-session';
+import { Client, XrpcAuthenticationError } from '@atproto/lex-client';
 
-// TODO: Warn users abot privacy policy, or deploy our own handler
+// TODO: Warn users about privacy policy, or deploy our own handler
 const HandleResolver = 'https://bsky.social';
 
 class AuthProvider
@@ -19,32 +21,62 @@ class AuthProvider
 
     /**
      * An OAuthClient object representing the provider's current interface with the OAuth API.
+     * Do not confuse with the PDS client, accessed through AuthProvider.client.
      */
     #oAuthClient;
-
-    /**
-     * TODO: Uncertain if this should be kept, may remove later on.
-     * An OAuthSession (from @atproto/oauth-client) object representing the user's current authenticated session.
-     * May be null if session is invalid.
-     */
-    #oAuthSession;
 
     // Below are products of authentication, both password and OAuth will create these
 
     /**
-     * An Agent object (from the atproto API) for interacting with the user's PDS. May be null if session is invalid.
+     * An object representing the user's current authenticated session.
+     * Can be either an OAuthSession (from atproto/oauth-client) or a PasswordSession (from atproto/lex-password-session).
+     * In either case, the client field should be used for actual PDS manipulation.
+     * May be null if session is invalid.
      */
-    #agent;
+    #session;
+
+    /**
+     * A Client object (from @atproto/lex) for interacting with the user's PDS. May be null if session is invalid.
+     */
+    #client;
+
+    /**
+     * Called when login attempt by handler fails.
+     * Logs a message by default, assign to handler function if desired.
+     */ 
+    onFailedLogin = () => { console.log("Failed to login."); };
+
+    /**
+     * Called when an invalid handle or password is provided.
+     * Logs a message by default, assign to handler function if desired.
+     */
+    onInvalidUserInfo = () => { console.log("Invalid user login information was provided, cannot login."); };
+
+    /**
+     * Called when a login attempt succeeds.
+     * Logs a message by default, assign to handler function if desired.
+     */
+    onSuccessfulLogin = () => { console.log("User succesfully logged in."); };
+
+    /**
+     * Called when the user logs out.
+     * Logs a message by default, assign to handler function if desired.
+     */
+    onLogout = () => { console.log("User has logged out."); };
 
     constructor() {
         this.#clientID = buildClientID();
     }
 
     /**
-     * Initializes the OAuth Client. Should be called exactly once before login if OAuth-based authentication is desired. (Not needed for password-based)
+     * Attempts to resume a session if one already exists. Also handles failed OAuth logins
+     * Starts by checking for password sessions.
+     * Otherwise, initializes the OAuth Client, which may recover an OAuth session. 
+     * Should be called exactly once before login if OAuth-based authentication is desired.
+     * 
      * @returns True if the initialization successfully recovered an existing session, false otherwise (should call login to get a session if false)
      */
-    async initClient() {
+    async init() {
         // Apparently possible to avoid trip to fetch metadata document, see top link
         this.#oAuthClient = await BrowserOAuthClient.load({
             clientId: this.#clientID,
@@ -58,14 +90,25 @@ class AuthProvider
             const { sub, cause } = event.detail;
             console.error(`Session for ${sub} is no longer available (cause: ${cause})`);
         });*/
-
-        const oAuthResult = await this.#oAuthClient.init();
+        var oAuthResult;
+        try {
+            oAuthResult = await this.#oAuthClient.init();
+        } catch(err) {
+            if (err instanceof OAuthCallbackError) {
+                // Failed oAuth login
+                this.onFailedLogin();
+            } else {
+                throw err;
+            }
+        }
 
         if (oAuthResult) {
             const {session, state } = oAuthResult;
             // Docs seem to indicate session will always exist
-            this.#oAuthSession = session;
-            this.#agent = new Agent(session);
+            this.#session = session;
+            this.#client = new Client(session);
+            this.onSuccessfulLogin();
+
             if (state != null) {
                 console.log(`Sucessful authentication via redirect, state: ${state}`);
                 return true;
@@ -74,14 +117,13 @@ class AuthProvider
                 return true;
             }
         } else {
-            console.log("Failed to authenticate, user needs to login");
+            console.log("Failed to authenticate from existing session, user needs to login");
             return false;
         }
     }
 
     /**
      * Unified function to log the user in, using either password or OAuth. 
-     * If not in a local test environment, OAuth attempts to login silently. (TODO: test)
      * If a password is provided, attempts to use password authentication.
      */
     async login(handle, password=null) {
@@ -102,7 +144,7 @@ class AuthProvider
             // Can only perform a silent sign on for non-local clients
             const signInPrompt = isLocal() ? 'login' : 'none';
 
-            this.#oAuthSession = await this.#oAuthClient.signIn(handle, {
+            this.#session = await this.#oAuthClient.signIn(handle, {
                 state: 'some value needed later',
                 prompt: signInPrompt,
                 ui_locales: 'en',
@@ -111,8 +153,13 @@ class AuthProvider
 
             // Unreachable, will redirect, prompting a page reload that restarts the client init process.
         } catch (err) {
-            // Login aborted
-            console.error(err);
+            if (err instanceof OAuthResolverError) {
+                this.onInvalidUserInfo();
+            } else {
+                console.error(err);
+            }
+
+            this.invalidateSession();
         }
     }
 
@@ -121,33 +168,66 @@ class AuthProvider
      * Initializes the agent field of the AuthProvider if successful.
      */
     async loginPassword(handle, password) {
+        // Based on https://github.com/bluesky-social/atproto/tree/main/packages/lex/lex#client-api
         try {
-            const session = new CredentialSession(new URL('https://bsky.social'));
-            await session.login({
+            this.#session = await PasswordSession.login({
+                service: 'https://bsky.social', //TODO: If we use a custom PDS, change this.
                 identifier: handle,
                 password: password,
+                onUpdated: (data) => {
+                    // Persist session for later restoration
+                    localStorage.setItem('session', JSON.stringify(data))
+                },
+                onDeleted: () => {
+                    localStorage.removeItem('session')
+                },
             });
-            this.#agent = new Agent(session);
+
+            this.#client = new Client(this.#session);
+
+            this.onSuccessfulLogin();
         } catch (err) {
-            console.error(err);
+            if (err instanceof XrpcAuthenticationError) {
+                this.onInvalidUserInfo();
+            } else {
+                console.error(err);
+            }
+
+            this.invalidateSession();
         }
     }
 
+    /**
+     * Logs the user out of their current session. Calls invalidateSession to clean up AuthProvider properties.
+     */
+    async logout() {
+        if (this.#session) {
+            // Try password logout first, then OAuth revoke.
+            if(this.#session instanceof PasswordSession){
+                await this.#session.logout();
+            } else if (this.#session instanceof OAuthSession) {
+                await this.#session.signOut();
+            }
+        }
+        this.invalidateSession();
+        this.onLogout();
+    }
+
+    // Handles session invalidation, may want to add a redirect at some point
     invalidateSession() {
-        // Handles session invalidation, may want to add a redirect at some point
-        this.#oAuthSession = null;
-        this.#agent = null;
+        this.#session = null;
+        this.#client = null;
     }
 
     isSessionValid() {
-        return this.#oAuthClient !== null && this.#oAuthSession !== null && this.#agent !== null;
+        return this.#session !== null && this.#client !== null;
     }
 
     /**
      * Use this to manipulate user PDS data.
      */
-    get agent() {
-        return this.#agent;
+    get client() {
+        return this.#client;
     }
 }
 

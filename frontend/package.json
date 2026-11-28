@@ -19,7 +19,10 @@
   },
   "dependencies": {
     "@atproto/api": "^0.32.7",
+    "@atproto/lex-client": "^0.7.1",
+    "@atproto/lex-password-session": "^0.3.8",
     "@atproto/lexicon": "^0.7.22",
+    "@atproto/oauth-client": "^0.9.8",
     "@atproto/oauth-client-browser": "^0.5.19"
   }
 }
