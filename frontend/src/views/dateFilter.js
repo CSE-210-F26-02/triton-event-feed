@@ -279,9 +279,9 @@ export function createDateFilter(root, { onChange, now = new Date() }) {
                 onchange: (event) => {
                   draft[field] = event.target.value;
                   renderCalendarMonth();
-                  picker
-                    .querySelectorAll("input")
-                    [field === "start" ? 0 : 1]?.focus();
+                  // Keep focus on the start/end input that was just changed.
+                  const rangeInputs = picker.querySelectorAll("input");
+                  rangeInputs[field === "start" ? 0 : 1]?.focus();
                 },
               }),
             ),

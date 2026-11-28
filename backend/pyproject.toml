@@ -39,15 +39,12 @@ testpaths = ["tests"]
 # limit, black wraps long lines in parentheses itself, so names never have
 # to be shortened to fit.
 line-length = 79
+target-version = ["py311"]
 
 [tool.ruff]
 # Same 79-character limit as black and flake8 so all three agree.
 line-length = 79
 target-version = "py311"
-
-[tool.black]
-line-length = 100
-target-version = ["py311"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
